@@ -402,7 +402,9 @@ class _LeaderScreenState extends State<LeaderScreen> {
   }
 
   Widget _teamCard(Game g, Team t, List<Player> members, DateTime now) {
-    final caught = members.where((p) => p.isCaught).length;
+    final caught = members.where((p) => p.isCaught && !p.observer).length;
+    final active = members.where((p) => !p.observer).length;
+    final centrals = members.length - active;
     return Panel(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -414,9 +416,10 @@ class _LeaderScreenState extends State<LeaderScreen> {
               const SizedBox(width: 10),
               Expanded(child: Text(t.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
               Text(
-                t.isHunter
-                    ? '${members.length} Jäger'
-                    : '${members.length - caught} frei${caught > 0 ? ' · $caught gefangen' : ''}',
+                (t.isHunter
+                        ? '$active Jäger'
+                        : '${active - caught} frei${caught > 0 ? ' · $caught gefangen' : ''}') +
+                    (centrals > 0 ? ' · $centrals Zentrale' : ''),
                 style: const TextStyle(color: PH.muted, fontSize: 12),
               ),
               PopupMenuButton<String>(
@@ -449,7 +452,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
       if (l.uid == p.uid) live = l;
     }
     final seen = live?.t ?? p.lastSeen;
-    final offline = seen == null || now.difference(seen).inMinutes >= 5;
+    final offline = !p.observer && (seen == null || now.difference(seen).inMinutes >= 5);
     final batteryLow = (p.battery ?? 100) < 20;
     return Padding(
       padding: const EdgeInsets.only(top: 6),
@@ -465,6 +468,14 @@ class _LeaderScreenState extends State<LeaderScreen> {
               ),
             ),
           ),
+          if (p.observer)
+            const Padding(
+              padding: EdgeInsets.only(right: 6),
+              child: Tooltip(
+                message: 'Zentrale im Browser – sendet keinen Standort',
+                child: Icon(Icons.desktop_windows_outlined, size: 15, color: PH.muted),
+              ),
+            ),
           if (p.isLive(now))
             const Padding(
               padding: EdgeInsets.only(right: 6),

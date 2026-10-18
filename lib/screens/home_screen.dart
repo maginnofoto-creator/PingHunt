@@ -92,6 +92,25 @@ class _HomeScreenState extends State<HomeScreen> {
         _open(PlayerScreen(code: code));
       });
 
+  Future<void> _joinCentral() => _run(() async {
+        final code = _validCode();
+        if (code == null) return;
+        final name = _name.text.trim();
+        if (name.isEmpty) {
+          _msg('Bitte zuerst einen Namen eingeben, z. B. „Jäger-Zentrale“.');
+          return;
+        }
+        final game = await Repo.i.getGame(code);
+        if (game == null) {
+          _msg('Kein Spiel mit dem Code $code gefunden.');
+          return;
+        }
+        await _remember(code);
+        await Repo.i.joinAsPlayer(code, name, observer: true);
+        _msg('Beigetreten. Die Spielleitung teilt dich jetzt einem Team zu.');
+        _open(PlayerScreen(code: code, observer: true));
+      });
+
   Future<void> _create() => _run(() async {
         final code = await Repo.i.createGame();
         _code.text = code;
@@ -210,6 +229,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 FilledButton(
                   onPressed: _busy ? null : _join,
                   child: Text(kIsWeb ? 'Spiel öffnen' : 'Spiel beitreten'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _joinCentral,
+                  icon: const Icon(Icons.desktop_windows_outlined),
+                  label: const Text('Als Zentrale beitreten (ohne GPS)'),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton(

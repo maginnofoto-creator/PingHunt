@@ -11,9 +11,12 @@ import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.code});
+  const PlayerScreen({super.key, required this.code, this.observer = false});
 
   final String code;
+
+  /// Zentrale: Team-Ansicht im Browser, ohne eigenen Standort.
+  final bool observer;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -28,6 +31,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<Player> _players = [];
   List<Ping> _pings = [];
   List<LivePos> _live = [];
+  List<GameEvent> _events = [];
   String? _liveTeam;
   bool _gameLoaded = false;
 
@@ -50,7 +54,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     _engine = PlayerEngine(widget.code)..addListener(_onEngine);
-    _engine.start();
+    if (!widget.observer) _engine.start();
+    if (widget.observer) {
+      _subs.add(_repo.eventsStream(widget.code).listen((e) => setState(() => _events = e)));
+    }
     _subs.add(_repo.gameStream(widget.code).listen((g) {
       setState(() {
         _game = g;
@@ -107,7 +114,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (g == null) return;
     final hunted = _players.where((p) {
       final t = g.team(p.teamId);
-      return t != null && !t.isHunter && !p.isCaught;
+      return t != null && !t.isHunter && !p.isCaught && !p.observer;
     }).toList();
     final chosen = await showModalBottomSheet<Player>(
       context: context,
@@ -222,12 +229,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       canPop: false,
       onPopInvoked: (didPop) async {
         if (didPop) return;
-        final leave = await confirm(context, 'Spiel verlassen?',
-            'Dein Standort wird dann nicht mehr übertragen und Pings fallen aus.');
+        final leave = widget.observer ||
+            await confirm(context, 'Spiel verlassen?',
+                'Dein Standort wird dann nicht mehr übertragen und Pings fallen aus.');
         if (leave && context.mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
-        body: Stack(
+        body: _wideWrap(Stack(
           children: [
             Positioned.fill(
               child: GameMap(
@@ -241,7 +249,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: Column(
+                child: _limitWidth(Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _header(g, now),
@@ -250,7 +258,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(height: 8),
                     _statusCard(g, me, myTeam, now),
                   ],
-                ),
+                )),
               ),
             ),
             Positioned(
@@ -266,20 +274,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
             Align(
-              alignment: Alignment.bottomCenter,
-              child: _bottomPanel(g, me, myTeam),
+              alignment: widget.observer ? Alignment.bottomLeft : Alignment.bottomCenter,
+              child: widget.observer
+                  ? ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: _bottomPanel(g, me, myTeam),
+                    )
+                  : _bottomPanel(g, me, myTeam),
             ),
           ],
-        ),
+        )),
       ),
     );
   }
+
+  /// Im Browser (breiter Bildschirm): Karte links, Ereignisse rechts.
+  Widget _wideWrap(Widget main) {
+    if (!widget.observer) return main;
+    return LayoutBuilder(builder: (context, box) {
+      if (box.maxWidth < 1000) return main;
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: main),
+          Container(
+            width: 340,
+            color: PH.surface,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text('EREIGNISSE', style: label()),
+                const SizedBox(height: 10),
+                if (_events.isEmpty)
+                  const Text('Noch nichts passiert.', style: TextStyle(color: PH.muted)),
+                for (final e in _events)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: 44, child: Text(hhmm(e.t), style: mono(12, color: PH.muted))),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, right: 8),
+                          child: Dot(Color(e.color), size: 8),
+                        ),
+                        Expanded(child: Text(e.text, style: const TextStyle(fontSize: 13, height: 1.35))),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  Widget _limitWidth(Widget child) => widget.observer
+      ? Align(
+          alignment: Alignment.topLeft,
+          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560), child: child),
+        )
+      : child;
 
   Widget _header(Game g, DateTime now) {
     final left = g.endsAt?.difference(now);
     return Row(
       children: [
         const Text('PINGHUNT', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 3)),
+        if (widget.observer) ...[
+          const SizedBox(width: 10),
+          const Pill(dot: PH.accent, child: Text('ZENTRALE · ohne GPS')),
+        ],
         const Spacer(),
         if (g.isRunning && left != null)
           Pill(
@@ -330,7 +396,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       children.add(const SizedBox(height: 4));
       children.add(Text(
         myTeam == null
-            ? 'Die Spielleitung teilt dich gleich einem Team zu.'
+            ? (widget.observer
+                ? 'Die Spielleitung muss dich als Zentrale einem Team zuteilen.'
+                : 'Die Spielleitung teilt dich gleich einem Team zu.')
             : 'Du bist in ${myTeam.name}.',
         style: const TextStyle(color: PH.muted),
       ));
@@ -436,7 +504,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ],
               )
             : Text(
-                myTeam == null
+                widget.observer
+                    ? (myTeam == null
+                        ? 'Die Spielleitung muss dich noch einem Team zuteilen. Danach siehst du hier, was dein Team sieht.'
+                        : 'Zentrale von ${myTeam.name}: Du siehst dein Team live. Dein eigener Standort wird nicht gesendet.')
+                    : myTeam == null
                     ? 'Sobald du in einem Team bist, siehst du hier deine Mitspieler.'
                     : 'Dein Team sieht dich live. Die Jäger sehen dich nur beim Ping – '
                         'oder ${g.liveMin} Minuten lang, wenn du das Spielfeld verlässt.',

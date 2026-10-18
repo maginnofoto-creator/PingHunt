@@ -137,6 +137,7 @@ class Player {
   final DateTime? liveUntil;
   final LatLng? exposed;
   final DateTime? exposedAt;
+  final bool observer; // Zentrale im Browser: sieht mit, sendet keinen Standort
 
   Player({
     required this.uid,
@@ -148,6 +149,7 @@ class Player {
     this.liveUntil,
     this.exposed,
     this.exposedAt,
+    this.observer = false,
   });
 
   bool get isCaught => status == 'caught';
@@ -172,6 +174,7 @@ class Player {
       liveUntil: _ts(m['liveUntil']),
       exposed: exposed,
       exposedAt: exposedAt,
+      observer: m['observer'] == true,
     );
   }
 }

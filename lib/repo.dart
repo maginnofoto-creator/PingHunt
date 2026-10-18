@@ -68,18 +68,26 @@ class Repo {
     return Game.fromDoc(snap);
   }
 
-  Future<void> joinAsPlayer(String code, String name) async {
+  Future<void> joinAsPlayer(String code, String name, {bool observer = false}) async {
     final ref = _players(code).doc(uid);
     final snap = await ref.get();
     if (snap.exists) {
-      await ref.update({'name': name, 'lastSeen': FieldValue.serverTimestamp()});
+      await ref.update({
+        'name': name,
+        'observer': observer,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
     } else {
       await ref.set({
         'name': name,
         'status': 'free',
+        'observer': observer,
         'lastSeen': FieldValue.serverTimestamp(),
       });
-      await addEvent(code, '$name ist dem Spiel beigetreten', 0xFF9AA4B2);
+      await addEvent(
+          code,
+          observer ? '$name ist als Zentrale beigetreten' : '$name ist dem Spiel beigetreten',
+          0xFF9AA4B2);
     }
   }
 

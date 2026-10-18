@@ -116,7 +116,12 @@ class PlayerEngine extends ChangeNotifier {
   }
 
   bool get _activeHunted =>
-      game != null && game!.isRunning && isHunted && me != null && !me!.isCaught;
+      game != null &&
+      game!.isRunning &&
+      isHunted &&
+      me != null &&
+      !me!.isCaught &&
+      !me!.observer;
 
   Future<void> _onPosition(Position pos) async {
     position = pos;

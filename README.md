@@ -89,6 +89,9 @@ Ohne diese Einstellungen beendet das Handy die App im Hintergrund und Pings fall
 4. **Spiel starten.** Nach dem Vorsprung kommt der erste Ping, dann im eingestellten Intervall.
 5. **Browser:** Code eingeben, „Spielleitung mit PIN übernehmen“ → großes Dashboard.
    Zuschauer geben nur den Code ein und klicken „Zuschauen“.
+6. **Zentrale:** Im Browser (oder einer zweiten App) Code + Namen eingeben und
+   „Als Zentrale beitreten (ohne GPS)“ wählen. Die Spielleitung teilt die Zentrale einem Team zu.
+   Die Zentrale sieht dann alles, was dieses Team sieht – ohne Verzögerung, aber ohne eigenen Standort.
 
 ### Regeln, die die App umsetzt
 
