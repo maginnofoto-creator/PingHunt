@@ -1,0 +1,18 @@
+# Wird beim Bauen automatisch erzeugt
+android/
+ios/
+web/
+linux/
+macos/
+windows/
+test/
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+pubspec.lock
+config.json
+out/
+*.iml
+.idea/
