@@ -52,17 +52,17 @@ jobs:
           mkdir -p ~/.android
           cp ci/debug.keystore ~/.android/debug.keystore
 
-      - run: flutter pub get
+      - run: flutter pub get 2>&1 | tee pub-get.log
 
       - name: Android-App bauen
         run: |
-          flutter build apk --release --build-number=${{ github.run_number }} --dart-define-from-file=config.json
+          flutter build apk --release --build-number=${{ github.run_number }} --dart-define-from-file=config.json 2>&1 | tee build-apk.log
           mkdir -p out
           cp build/app/outputs/flutter-apk/app-release.apk out/PingHunt.apk
 
       - name: Browser-Version bauen
         run: |
-          flutter build web --release --base-href "/${{ github.event.repository.name }}/" --dart-define-from-file=config.json
+          flutter build web --release --base-href "/${{ github.event.repository.name }}/" --dart-define-from-file=config.json 2>&1 | tee build-web.log
           rm -f config.json
 
       - name: APK als Download veröffentlichen
@@ -77,6 +77,18 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
+
+      - name: Fehlerprotokoll sichern
+        if: failure()
+        run: |
+          mkdir -p /tmp/logs
+          cp *.log /tmp/logs/ 2>/dev/null || echo "keine Logs" > /tmp/logs/none.txt
+          cd /tmp/logs
+          git init -q
+          git checkout -q -b build-logs
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.com commit -qm "Fehlerprotokoll Lauf ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" build-logs
 
   deploy-web:
     needs: build
