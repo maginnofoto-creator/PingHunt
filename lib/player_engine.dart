@@ -197,12 +197,14 @@ class PlayerEngine extends ChangeNotifier {
             't': Timestamp.fromDate(now),
           }));
     }
-    // Jäger-Spur für Zuschauer (einmal pro Minute)
+    // Jäger-Position für Zuschauer (ohne Verzögerung)
     if (g != null &&
         g.isRunning &&
         isHunter &&
         !(me?.observer ?? false) &&
-        (_lastTrail == null || now.difference(_lastTrail!).inSeconds >= 60)) {
+        (_lastTrail == null ||
+            now.difference(_lastTrail!).inSeconds >= 60 ||
+            (moved > 40 && now.difference(_lastTrail!).inSeconds >= 20))) {
       _lastTrail = now;
       await _safe(() => _repo.writeTrail(code, {
             'uid': _repo.uid,

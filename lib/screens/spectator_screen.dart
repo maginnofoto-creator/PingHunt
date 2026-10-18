@@ -45,9 +45,9 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
     _subs.add(_repo.playersStream(c).listen((p) => setState(() => _players = p)));
     _subs.add(_repo.pingsStream(c).listen((p) => setState(() => _pings = p)));
     _subs.add(_repo.eventsStream(c).listen((e) => setState(() => _events = e)));
-    // Jäger-Spur der letzten 3 Stunden (Verzögerung max. 60 min)
+    // Jäger-Positionen der letzten 30 Minuten
     _subs.add(_repo
-        .trailStream(c, DateTime.now().subtract(const Duration(hours: 3)))
+        .trailStream(c, DateTime.now().subtract(const Duration(minutes: 30)))
         .listen((t) => setState(() => _trail = t), onError: (_) {}));
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
@@ -89,11 +89,10 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
         ));
       }
     }
-    // Jäger: letzte bekannte Position vor der Verzögerungsgrenze
+    // Jäger: immer ohne Verzögerung (letzte bekannte Position)
     final hunters = <String, TrailPos>{};
     for (final t in _trail) {
-      if (t.t.isAfter(cutoff)) continue;
-      if (now.difference(t.t).inMinutes > g.spectatorDelayMin + 30) continue;
+      if (now.difference(t.t).inMinutes > 30) continue;
       final team = g.team(t.teamId);
       if (team == null || !team.isHunter) continue;
       hunters[t.uid] = t;
@@ -102,7 +101,7 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
       markers.add(labelMarker(
         point: h.pos,
         color: Color(g.team(h.teamId)?.color ?? PH.hunterColor),
-        label: '${h.name}${delay == Duration.zero ? '' : ' · ${ago(h.t, now)}'}',
+        label: now.difference(h.t).inMinutes >= 2 ? '${h.name} · ${ago(h.t, now)}' : h.name,
         size: 14,
         ring: true,
       ));
