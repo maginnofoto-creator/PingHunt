@@ -22,3 +22,7 @@ dependencies:
 
 flutter:
   uses-material-design: true
+
+dependency_overrides:
+  # 4.6.2 setzt eine neuere Flutter-Version voraus
+  geolocator_android: 4.6.1
