@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../geo.dart';
 import '../models.dart';
 import '../theme.dart';
 
@@ -16,6 +17,7 @@ class GameMap extends StatelessWidget {
     this.markers = const [],
     this.polylines = const [],
     this.initialCenter,
+    this.zones = const [],
   });
 
   final MapController controller;
@@ -23,6 +25,7 @@ class GameMap extends StatelessWidget {
   final List<Marker> markers;
   final List<Polyline> polylines;
   final LatLng? initialCenter;
+  final List<Zone> zones;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +56,41 @@ class GameMap extends StatelessWidget {
               borderStrokeWidth: 3,
             ),
           ]),
+        if (zones.isNotEmpty)
+          PolygonLayer(polygons: [
+            for (final z in zones)
+              Polygon(
+                points: z.points,
+                color: Color(z.color).withOpacity(0.2),
+                borderColor: Color(z.color),
+                borderStrokeWidth: 2,
+              ),
+          ]),
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
+        if (zones.isNotEmpty)
+          MarkerLayer(markers: [
+            for (final z in zones)
+              Marker(
+                point: centerOf(z.points),
+                width: 160,
+                height: 26,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Color(z.color).withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      z.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: PH.bg),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
         MarkerLayer(markers: markers),
         const SimpleAttributionWidget(
           source: Text('© OpenStreetMap-Mitwirkende'),

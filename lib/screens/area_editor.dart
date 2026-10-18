@@ -11,10 +11,26 @@ enum _Mode { view, freehand, points }
 
 /// Spielfeld freihand oder Punkt für Punkt zeichnen.
 class AreaEditor extends StatefulWidget {
-  const AreaEditor({super.key, required this.code, required this.initial});
+  const AreaEditor({
+    super.key,
+    required this.code,
+    required this.initial,
+    this.title = 'Spielfeld zeichnen',
+    this.color = PH.accent,
+    this.reference = const [],
+    this.onSave,
+  });
 
   final String code;
   final List<LatLng> initial;
+  final String title;
+  final Color color;
+
+  /// Spielfeld als Orientierung beim Zeichnen einer Zone.
+  final List<LatLng> reference;
+
+  /// Eigene Speicherfunktion (z. B. für Zonen). Ohne: Spielfeld speichern.
+  final Future<void> Function(List<LatLng>)? onSave;
 
   @override
   State<AreaEditor> createState() => _AreaEditorState();
@@ -26,6 +42,8 @@ class _AreaEditorState extends State<AreaEditor> {
   _Mode _mode = _Mode.view;
   Offset? _lastOffset;
   bool _saving = false;
+
+  List<LatLng> get _fitPts => _pts.length >= 3 ? _pts : widget.reference;
 
   void _msg(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
@@ -57,13 +75,17 @@ class _AreaEditorState extends State<AreaEditor> {
   }
 
   Future<void> _save() async {
-    if (_pts.isNotEmpty && _pts.length < 3) {
-      _msg('Das Spielfeld braucht mindestens 3 Punkte.');
+    if ((_pts.isNotEmpty || widget.onSave != null) && _pts.length < 3) {
+      _msg('Bitte mindestens 3 Punkte zeichnen.');
       return;
     }
     setState(() => _saving = true);
     try {
-      await Repo.i.saveArea(widget.code, _pts);
+      if (widget.onSave != null) {
+        await widget.onSave!(_pts);
+      } else {
+        await Repo.i.saveArea(widget.code, _pts);
+      }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       _msg('Speichern fehlgeschlagen: $e');
@@ -81,7 +103,7 @@ class _AreaEditorState extends State<AreaEditor> {
     };
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Spielfeld zeichnen'),
+        title: Text(widget.title),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -101,11 +123,11 @@ class _AreaEditorState extends State<AreaEditor> {
                   child: FlutterMap(
                     mapController: _map,
                     options: MapOptions(
-                      initialCenter: _pts.isNotEmpty ? _pts.first : const LatLng(51.16, 10.45),
-                      initialZoom: _pts.isNotEmpty ? 15 : 6,
-                      initialCameraFit: _pts.length >= 3
+                      initialCenter: _fitPts.isNotEmpty ? _fitPts.first : const LatLng(51.16, 10.45),
+                      initialZoom: _fitPts.isNotEmpty ? 15 : 6,
+                      initialCameraFit: _fitPts.length >= 3
                           ? CameraFit.bounds(
-                              bounds: LatLngBounds.fromPoints(_pts),
+                              bounds: LatLngBounds.fromPoints(_fitPts),
                               padding: const EdgeInsets.all(40),
                             )
                           : null,
@@ -119,18 +141,26 @@ class _AreaEditorState extends State<AreaEditor> {
                     ),
                     children: [
                       darkTiles(context),
+                      if (widget.reference.length >= 3)
+                        PolygonLayer(polygons: [
+                          Polygon(
+                            points: widget.reference,
+                            borderColor: PH.accent.withOpacity(0.6),
+                            borderStrokeWidth: 2,
+                          ),
+                        ]),
                       if (_pts.length >= 3)
                         PolygonLayer(polygons: [
                           Polygon(
                             points: _pts,
-                            color: PH.accent.withOpacity(0.12),
-                            borderColor: PH.accent,
+                            color: widget.color.withOpacity(0.18),
+                            borderColor: widget.color,
                             borderStrokeWidth: 3,
                           ),
                         ])
                       else if (_pts.length == 2)
                         PolylineLayer(polylines: [
-                          Polyline(points: _pts, color: PH.accent, strokeWidth: 3),
+                          Polyline(points: _pts, color: widget.color, strokeWidth: 3),
                         ]),
                       if (_mode == _Mode.points)
                         MarkerLayer(markers: [
@@ -141,7 +171,7 @@ class _AreaEditorState extends State<AreaEditor> {
                               height: 14,
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: PH.accent,
+                                  color: widget.color,
                                   shape: BoxShape.circle,
                                   border: Border.all(color: Colors.white, width: 2),
                                 ),

@@ -244,6 +244,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 markers: _markers(g, me, now),
                 polylines: polylines,
                 initialCenter: _engine.latLng,
+                zones: [for (final z in g.zones) if (z.visibleTo(_repo.uid, me?.teamId)) z],
               ),
             ),
             SafeArea(

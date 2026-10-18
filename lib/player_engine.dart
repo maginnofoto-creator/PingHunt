@@ -40,6 +40,7 @@ class PlayerEngine extends ChangeNotifier {
   DateTime? _lastLiveWrite;
   LatLng? _lastLivePos;
   DateTime? _lastExposedWrite;
+  DateTime? _lastTrail;
   DateTime? _lastBattery;
   int? _battery;
   bool _pinging = false;
@@ -183,8 +184,8 @@ class PlayerEngine extends ChangeNotifier {
         ? double.infinity
         : const Distance().as(LengthUnit.Meter, _lastLivePos!, here);
     if (_lastLiveWrite == null ||
-        now.difference(_lastLiveWrite!).inSeconds >= 30 ||
-        (moved > 15 && now.difference(_lastLiveWrite!).inSeconds >= 8)) {
+        now.difference(_lastLiveWrite!).inSeconds >= 60 ||
+        (moved > 40 && now.difference(_lastLiveWrite!).inSeconds >= 20)) {
       _lastLiveWrite = now;
       _lastLivePos = here;
       await _safe(() => _repo.writeLive(code, {
@@ -193,6 +194,22 @@ class PlayerEngine extends ChangeNotifier {
             'lat': here.latitude,
             'lng': here.longitude,
             'acc': pos.accuracy,
+            't': Timestamp.fromDate(now),
+          }));
+    }
+    // Jäger-Spur für Zuschauer (einmal pro Minute)
+    if (g != null &&
+        g.isRunning &&
+        isHunter &&
+        !(me?.observer ?? false) &&
+        (_lastTrail == null || now.difference(_lastTrail!).inSeconds >= 60)) {
+      _lastTrail = now;
+      await _safe(() => _repo.writeTrail(code, {
+            'uid': _repo.uid,
+            'name': me?.name ?? '',
+            'teamId': me?.teamId,
+            'lat': here.latitude,
+            'lng': here.longitude,
             't': Timestamp.fromDate(now),
           }));
     }

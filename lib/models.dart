@@ -25,6 +25,51 @@ class Team {
       );
 }
 
+/// Farbige Zone auf der Karte, sichtbar für alle, ein Team oder einen Spieler.
+class Zone {
+  final String id;
+  final String name;
+  final int color;
+  final List<LatLng> points;
+  final String scope; // all, team, player
+  final String? target; // teamId oder uid
+
+  const Zone(this.id, this.name, this.color, this.points, this.scope, this.target);
+
+  bool visibleTo(String? uid, String? teamId) {
+    if (scope == 'team') return target != null && target == teamId;
+    if (scope == 'player') return target != null && target == uid;
+    return true;
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'color': color,
+        'scope': scope,
+        'target': target,
+        'points': [for (final p in points) {'lat': p.latitude, 'lng': p.longitude}],
+      };
+
+  static Zone? fromMap(Map<String, dynamic> m) {
+    final raw = (m['points'] as List?) ?? const [];
+    final pts = [
+      for (final p in raw)
+        if (p is Map && p['lat'] is num && p['lng'] is num)
+          LatLng((p['lat'] as num).toDouble(), (p['lng'] as num).toDouble()),
+    ];
+    if (pts.length < 3) return null;
+    return Zone(
+      (m['id'] as String?) ?? 'z',
+      (m['name'] as String?) ?? 'Zone',
+      _int(m['color'], 0xFF4DA3FF),
+      pts,
+      (m['scope'] as String?) ?? 'all',
+      m['target'] as String?,
+    );
+  }
+}
+
 class Game {
   final String code;
   final String leaderUid;
@@ -42,6 +87,7 @@ class Game {
   final DateTime? endsAt;
   final DateTime? pingAnchor;
   final DateTime? pingRequestAt;
+  final List<Zone> zones;
 
   Game({
     required this.code,
@@ -60,6 +106,7 @@ class Game {
     this.endsAt,
     this.pingAnchor,
     this.pingRequestAt,
+    this.zones = const [],
   });
 
   bool get isRunning => status == 'running';
@@ -123,6 +170,10 @@ class Game {
       endsAt: _ts(m['endsAt']),
       pingAnchor: _ts(m['pingAnchor']),
       pingRequestAt: _ts(m['pingRequestAt']),
+      zones: [
+        for (final z in (m['zones'] as List?) ?? const [])
+          if (z is Map) Zone.fromMap(Map<String, dynamic>.from(z)),
+      ].whereType<Zone>().toList(),
     );
   }
 }
@@ -238,5 +289,27 @@ class GameEvent {
       _int(m['color'], 0xFF9AA4B2),
       _ts(m['t']) ?? DateTime.now(),
     );
+  }
+}
+
+/// Verzögerte Jäger-Spur für Zuschauer.
+class TrailPos {
+  final String uid;
+  final String name;
+  final String? teamId;
+  final LatLng pos;
+  final DateTime t;
+
+  TrailPos(this.uid, this.name, this.teamId, this.pos, this.t);
+
+  static TrailPos? fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final m = doc.data();
+    if (m == null) return null;
+    final lat = _dbl(m['lat']);
+    final lng = _dbl(m['lng']);
+    final t = _ts(m['t']);
+    if (lat == null || lng == null || t == null) return null;
+    return TrailPos((m['uid'] as String?) ?? '', (m['name'] as String?) ?? '',
+        m['teamId'] as String?, LatLng(lat, lng), t);
   }
 }

@@ -28,6 +28,7 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
   List<Player> _players = [];
   List<Ping> _pings = [];
   List<GameEvent> _events = [];
+  List<TrailPos> _trail = [];
   int _history = 3;
 
   final _subs = <StreamSubscription>[];
@@ -44,6 +45,10 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
     _subs.add(_repo.playersStream(c).listen((p) => setState(() => _players = p)));
     _subs.add(_repo.pingsStream(c).listen((p) => setState(() => _pings = p)));
     _subs.add(_repo.eventsStream(c).listen((e) => setState(() => _events = e)));
+    // Jäger-Spur der letzten 3 Stunden (Verzögerung max. 60 min)
+    _subs.add(_repo
+        .trailStream(c, DateTime.now().subtract(const Duration(hours: 3)))
+        .listen((t) => setState(() => _trail = t), onError: (_) {}));
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -84,11 +89,30 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
         ));
       }
     }
+    // Jäger: letzte bekannte Position vor der Verzögerungsgrenze
+    final hunters = <String, TrailPos>{};
+    for (final t in _trail) {
+      if (t.t.isAfter(cutoff)) continue;
+      if (now.difference(t.t).inMinutes > g.spectatorDelayMin + 30) continue;
+      final team = g.team(t.teamId);
+      if (team == null || !team.isHunter) continue;
+      hunters[t.uid] = t;
+    }
+    for (final h in hunters.values) {
+      markers.add(labelMarker(
+        point: h.pos,
+        color: Color(g.team(h.teamId)?.color ?? PH.hunterColor),
+        label: '${h.name}${delay == Duration.zero ? '' : ' · ${ago(h.t, now)}'}',
+        size: 14,
+        ring: true,
+      ));
+    }
     final events = _events.where((e) => !e.t.isAfter(cutoff)).toList();
 
     final map = Stack(
       children: [
-        Positioned.fill(child: GameMap(controller: _map, area: g.area, markers: markers, polylines: lines)),
+        Positioned.fill(
+            child: GameMap(controller: _map, area: g.area, markers: markers, polylines: lines, zones: g.zones)),
         Positioned(
           left: 12,
           top: 12,

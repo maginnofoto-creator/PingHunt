@@ -27,6 +27,29 @@ class Repo {
       gameRef(code).collection('live');
   CollectionReference<Map<String, dynamic>> _events(String code) =>
       gameRef(code).collection('events');
+  CollectionReference<Map<String, dynamic>> _trail(String code) =>
+      gameRef(code).collection('trail');
+
+  Future<void> writeTrail(String code, Map<String, dynamic> data) => _trail(code).add(data);
+
+  /// Jäger-Spur der letzten Stunden (für Zuschauer).
+  Stream<List<TrailPos>> trailStream(String code, DateTime since) => _trail(code)
+      .where('t', isGreaterThan: Timestamp.fromDate(since))
+      .orderBy('t')
+      .snapshots()
+      .map((q) => q.docs.map(TrailPos.fromDoc).whereType<TrailPos>().toList());
+
+  Future<void> saveZones(String code, List<Zone> zones) =>
+      gameRef(code).update({'zones': [for (final z in zones) z.toMap()]});
+
+  /// Vorsprung ändern – in der Lobby oder solange der Vorsprung noch läuft.
+  Future<void> changeHeadStart(Game g, int minutes) async {
+    final data = <String, dynamic>{'headStartMin': minutes};
+    if (g.isRunning && g.startedAt != null) {
+      data['pingAnchor'] = Timestamp.fromDate(g.startedAt!.add(Duration(minutes: minutes)));
+    }
+    await updateGame(g.code, data);
+  }
 
   // ---------- Spiel anlegen / beitreten ----------
 

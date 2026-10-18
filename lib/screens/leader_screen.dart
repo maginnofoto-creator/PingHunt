@@ -100,7 +100,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
     return Stack(
       children: [
         Positioned.fill(
-          child: GameMap(controller: _map, area: g.area, markers: markers, polylines: lines),
+          child: GameMap(controller: _map, area: g.area, markers: markers, polylines: lines, zones: g.zones),
         ),
         Positioned(
           left: 12,
@@ -277,6 +277,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
             icon: const Icon(Icons.draw),
             label: Text(g.area.length >= 3 ? 'Spielfeld bearbeiten' : 'Spielfeld zeichnen'),
           ),
+          const SizedBox(height: 14),
+          _zonesSection(g),
           const SizedBox(height: 12),
           const Divider(color: PH.line),
           StepperRow(
@@ -288,14 +290,14 @@ class _LeaderScreenState extends State<LeaderScreen> {
           ),
           StepperRow(
             title: 'Vorsprung',
-            subtitle: 'bis zum ersten Ping',
+            subtitle: _headStartEditable(g, now) ? 'bis zum ersten Ping' : 'schon abgelaufen',
             value: '${g.headStartMin} min',
-            onMinus: !g.isLobby || g.headStartMin <= 0
+            onMinus: !_headStartEditable(g, now) || g.headStartMin <= 0
                 ? null
-                : () => _do(() => _repo.updateGame(g.code, {'headStartMin': g.headStartMin - 5})),
-            onPlus: !g.isLobby || g.headStartMin >= 120
+                : () => _do(() => _repo.changeHeadStart(g, g.headStartMin - 5)),
+            onPlus: !_headStartEditable(g, now) || g.headStartMin >= 120
                 ? null
-                : () => _do(() => _repo.updateGame(g.code, {'headStartMin': g.headStartMin + 5})),
+                : () => _do(() => _repo.changeHeadStart(g, g.headStartMin + 5)),
           ),
           StepperRow(
             title: 'Zone verlassen',
@@ -351,6 +353,10 @@ class _LeaderScreenState extends State<LeaderScreen> {
     );
   }
 
+  /// Vorsprung: in Lobby/nach dem Spiel frei, im Spiel nur solange er noch läuft.
+  bool _headStartEditable(Game g, DateTime now) =>
+      !g.isRunning || (g.pingAnchor != null && now.isBefore(g.pingAnchor!));
+
   Future<void> _changeDuration(Game g, int delta) => _do(() {
         final data = <String, dynamic>{'durationH': g.durationH + delta};
         if (g.isRunning && g.endsAt != null) {
@@ -358,6 +364,198 @@ class _LeaderScreenState extends State<LeaderScreen> {
         }
         return _repo.updateGame(g.code, data);
       });
+
+  // ---------------- Zonen ----------------
+
+  String _scopeLabel(Game g, Zone z) {
+    if (z.scope == 'team') return 'nur ${g.team(z.target)?.name ?? 'Team'}';
+    if (z.scope == 'player') {
+      for (final p in _players) {
+        if (p.uid == z.target) return 'nur ${p.name}';
+      }
+      return 'nur ein Spieler';
+    }
+    return 'für alle';
+  }
+
+  Widget _zonesSection(Game g) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text('ZONEN · ${g.zones.length}', style: label()),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () => _editZone(g, null),
+              icon: const Icon(Icons.add),
+              label: const Text('Zone'),
+            ),
+          ],
+        ),
+        if (g.zones.isEmpty)
+          const Text('Farbige Bereiche auf der Karte, z. B. Startpunkt, Versteck-Zone oder Sperrgebiet – '
+              'sichtbar für alle, ein Team oder einen einzelnen Spieler.',
+              style: TextStyle(color: PH.muted, fontSize: 12.5)),
+        for (final z in g.zones)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: [
+                Dot(Color(z.color), size: 14),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(z.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(_scopeLabel(g, z), style: const TextStyle(fontSize: 12, color: PH.muted)),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Zone bearbeiten',
+                  onSelected: (v) async {
+                    if (v == 'edit') _editZone(g, z);
+                    if (v == 'delete' && await confirm(context, '${z.name} löschen?', 'Die Zone verschwindet von allen Karten.')) {
+                      await _do(() => _repo.saveZones(g.code, [for (final o in g.zones) if (o.id != z.id) o]));
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Bearbeiten')),
+                    PopupMenuItem(value: 'delete', child: Text('Löschen')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _editZone(Game g, Zone? existing) async {
+    final name = TextEditingController(text: existing?.name ?? '');
+    var color = existing?.color ?? PH.teamColors[g.zones.length % PH.teamColors.length];
+    var scope = existing?.scope ?? 'all';
+    String? target = existing?.target;
+    final players = _players.where((p) => !p.observer).toList()..sort((a, b) => a.name.compareTo(b.name));
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setLocal) => AlertDialog(
+          title: Text(existing == null ? 'Neue Zone' : 'Zone bearbeiten'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: name,
+                  autofocus: existing == null,
+                  decoration: const InputDecoration(labelText: 'Name, z. B. „Start Team Fuchs“'),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final col in [PH.hunterColor, ...PH.teamColors])
+                      InkWell(
+                        onTap: () => setLocal(() => color = col),
+                        customBorder: const CircleBorder(),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: Color(col),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: col == color ? Colors.white : Colors.transparent, width: 3),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text('Wer sieht die Zone?', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'all', label: Text('Alle')),
+                    ButtonSegment(value: 'team', label: Text('Ein Team')),
+                    ButtonSegment(value: 'player', label: Text('Ein Spieler')),
+                  ],
+                  selected: {scope},
+                  onSelectionChanged: (v) => setLocal(() {
+                    scope = v.first;
+                    target = null;
+                  }),
+                ),
+                if (scope == 'team')
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    hint: const Text('Team wählen'),
+                    value: g.teams.containsKey(target) ? target : null,
+                    dropdownColor: PH.surface2,
+                    items: [
+                      for (final t in g.teamList) DropdownMenuItem(value: t.id, child: Text(t.name)),
+                    ],
+                    onChanged: (v) => setLocal(() => target = v),
+                  ),
+                if (scope == 'player')
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    hint: const Text('Spieler wählen'),
+                    value: players.any((p) => p.uid == target) ? target : null,
+                    dropdownColor: PH.surface2,
+                    items: [
+                      for (final p in players) DropdownMenuItem(value: p.uid, child: Text(p.name)),
+                    ],
+                    onChanged: (v) => setLocal(() => target = v),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Abbrechen')),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(existing == null ? 'Weiter zum Zeichnen' : 'Speichern & neu zeichnen'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    if (name.text.trim().isEmpty) {
+      _msg('Bitte einen Namen für die Zone eingeben.');
+      return;
+    }
+    if (scope != 'all' && target == null) {
+      _msg('Bitte ein Team bzw. einen Spieler auswählen.');
+      return;
+    }
+    final id = existing?.id ?? 'z${DateTime.now().millisecondsSinceEpoch}';
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AreaEditor(
+          code: g.code,
+          initial: existing?.points ?? const [],
+          title: 'Zone: ${name.text.trim()}',
+          color: Color(color),
+          reference: g.area,
+          onSave: (pts) async {
+            final zone = Zone(id, name.text.trim(), color, pts, scope, scope == 'all' ? null : target);
+            final latest = _game ?? g;
+            final list = [for (final o in latest.zones) if (o.id != id) o, zone];
+            await _repo.saveZones(g.code, list);
+          },
+        ),
+      ),
+    );
+  }
 
   // ---------------- Teams ----------------
 

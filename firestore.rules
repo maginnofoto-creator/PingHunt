@@ -71,6 +71,13 @@ service cloud.firestore {
         allow delete: if isLeader(code);
       }
 
+      // Jäger-Spur für Zuschauer (die App zeigt sie verzögert an).
+      match /trail/{trailId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+        allow delete: if isLeader(code);
+      }
+
       match /events/{eventId} {
         allow read: if signedIn();
         allow create: if signedIn();
