@@ -56,7 +56,7 @@ class GameMap extends StatelessWidget {
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
         MarkerLayer(markers: markers),
         const SimpleAttributionWidget(
-          source: Text('OpenStreetMap, CARTO'),
+          source: Text('© OpenStreetMap-Mitwirkende'),
           backgroundColor: Color(0xAA0B0E13),
         ),
       ],
@@ -65,11 +65,10 @@ class GameMap extends StatelessWidget {
 }
 
 Widget darkTiles(BuildContext context) => TileLayer(
-      urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      subdomains: const ['a', 'b', 'c', 'd'],
-      retinaMode: RetinaMode.isHighDensity(context),
+      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'de.pinghunt.pinghunt',
-      maxZoom: 20,
+      maxZoom: 19,
+      tileBuilder: darkModeTileBuilder,
     );
 
 /// Punkt mit Namensschild darunter; der Punkt liegt genau auf der Position.
