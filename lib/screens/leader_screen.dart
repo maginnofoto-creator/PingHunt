@@ -394,8 +394,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
           ],
         ),
         if (g.zones.isEmpty)
-          const Text('Farbige Bereiche auf der Karte, z. B. Startpunkt, Versteck-Zone oder Sperrgebiet – '
-              'sichtbar für alle, ein Team oder einen einzelnen Spieler.',
+          const Text('Farbige Markierungen (z. B. Startpunkt) für alle, ein Team oder einen Spieler – '
+              'oder Sperrgebiete, die wie das Verlassen des Spielfelds zählen.',
               style: TextStyle(color: PH.muted, fontSize: 12.5)),
         for (final z in g.zones)
           Padding(
@@ -409,7 +409,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(z.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Text(_scopeLabel(g, z), style: const TextStyle(fontSize: 12, color: PH.muted)),
+                      Text(z.isBlocked ? 'Sperrgebiet · für alle' : _scopeLabel(g, z),
+                          style: TextStyle(fontSize: 12, color: z.isBlocked ? PH.danger : PH.muted)),
                     ],
                   ),
                 ),
@@ -438,6 +439,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
     var color = existing?.color ?? PH.teamColors[g.zones.length % PH.teamColors.length];
     var scope = existing?.scope ?? 'all';
     String? target = existing?.target;
+    var kind = existing?.kind ?? 'mark';
     final players = _players.where((p) => !p.observer).toList()..sort((a, b) => a.name.compareTo(b.name));
 
     final ok = await showDialog<bool>(
@@ -455,6 +457,33 @@ class _LeaderScreenState extends State<LeaderScreen> {
                   autofocus: existing == null,
                   decoration: const InputDecoration(labelText: 'Name, z. B. „Start Team Fuchs“'),
                 ),
+                const SizedBox(height: 12),
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'mark', icon: Icon(Icons.flag_outlined), label: Text('Markierung')),
+                    ButtonSegment(value: 'blocked', icon: Icon(Icons.block), label: Text('Sperrgebiet')),
+                  ],
+                  selected: {kind},
+                  onSelectionChanged: (v) => setLocal(() {
+                    kind = v.first;
+                    if (kind == 'blocked') {
+                      color = PH.hunterColor;
+                      scope = 'all';
+                      target = null;
+                    }
+                  }),
+                ),
+                if (kind == 'blocked')
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Für alle sichtbar. Gejagte, die es betreten, gelten wie beim Verlassen des Spielfelds '
+                      'als live sichtbar. Jäger bekommen eine Warnung, die Spielleitung eine Meldung.',
+                      style: TextStyle(fontSize: 12, color: PH.muted),
+                    ),
+                  ),
+                if (kind == 'mark') ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -514,6 +543,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
                     ],
                     onChanged: (v) => setLocal(() => target = v),
                   ),
+                ],
               ],
             ),
           ),
@@ -547,7 +577,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
           color: Color(color),
           reference: g.area,
           onSave: (pts) async {
-            final zone = Zone(id, name.text.trim(), color, pts, scope, scope == 'all' ? null : target);
+            final zone = Zone(id, name.text.trim(), color, pts, scope, scope == 'all' ? null : target,
+                kind: kind);
             final latest = _game ?? g;
             final list = [for (final o in latest.zones) if (o.id != id) o, zone];
             await _repo.saveZones(g.code, list);

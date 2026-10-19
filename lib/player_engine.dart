@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'geo.dart';
 import 'models.dart';
 import 'repo.dart';
+import 'theme.dart';
 
 /// Läuft auf dem Handy eines Spielers: GPS, Pings, Zonen-Regel.
 class PlayerEngine extends ChangeNotifier {
@@ -27,6 +28,13 @@ class PlayerEngine extends ChangeNotifier {
   Position? position;
   bool? inside;
   double? distToEdge;
+
+  /// Sperrgebiet, in dem der Spieler gerade steht (oder null).
+  Zone? inBlocked;
+
+  /// Abstand zum nächsten Sperrgebiet in Metern (wenn eines existiert).
+  double? distToBlocked;
+  String? _hunterWarnedZone;
   DateTime? liveUntil;
   String? error;
   bool tracking = false;
@@ -130,43 +138,80 @@ class PlayerEngine extends ChangeNotifier {
     final here = LatLng(pos.latitude, pos.longitude);
     final g = game;
 
-    // Zonen-Regel
+    // Spielfeld und Sperrgebiete
     if (g != null && g.area.length >= 3) {
       inside = pointInPolygon(here, g.area);
       distToEdge = distanceToEdge(here, g.area);
-      if (_activeHunted) {
-        if (inside == false) {
-          _outsideSince ??= now;
-          if (!_exitTriggered &&
-              now.difference(_outsideSince!).inSeconds >= g.graceSec) {
-            _exitTriggered = true;
-            liveUntil = now.add(Duration(minutes: g.liveMin));
-            HapticFeedback.vibrate();
-            await _safe(() => _repo.updateMe(code, {
-                  'liveUntil': Timestamp.fromDate(liveUntil!),
-                  'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
-                }));
-            _lastExposedWrite = now;
-            await _safe(() => _repo.addEvent(
-                code,
-                '${me?.name ?? 'Spieler'} (${myTeam?.name ?? ''}) hat die Zone verlassen – ${g.liveMin} min live sichtbar',
-                myTeam?.color ?? 0xFFFF4D4D));
-          }
-        } else {
-          _outsideSince = null;
-          _exitTriggered = false;
-          final d = distToEdge ?? double.infinity;
-          if (d < 50 && !_edgeWarned) {
-            _edgeWarned = true;
-            HapticFeedback.heavyImpact();
-          } else if (d > 80) {
-            _edgeWarned = false;
-          }
-        }
-      }
     } else {
       inside = null;
       distToEdge = null;
+    }
+    inBlocked = null;
+    distToBlocked = null;
+    if (g != null) {
+      for (final z in g.blockedZones) {
+        if (pointInPolygon(here, z.points)) {
+          inBlocked = z;
+        } else {
+          final d = distanceToEdge(here, z.points);
+          if (distToBlocked == null || d < distToBlocked!) distToBlocked = d;
+        }
+      }
+    }
+
+    if (g != null && _activeHunted) {
+      final violating = inside == false || inBlocked != null;
+      if (violating) {
+        _outsideSince ??= now;
+        if (!_exitTriggered && now.difference(_outsideSince!).inSeconds >= g.graceSec) {
+          _exitTriggered = true;
+          liveUntil = now.add(Duration(minutes: g.liveMin));
+          HapticFeedback.vibrate();
+          await _safe(() => _repo.updateMe(code, {
+                'liveUntil': Timestamp.fromDate(liveUntil!),
+                'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
+              }));
+          _lastExposedWrite = now;
+          final what = inBlocked != null
+              ? 'hat das Sperrgebiet „${inBlocked!.name}“ betreten'
+              : 'hat das Spielfeld verlassen';
+          await _safe(() => _repo.addEvent(
+              code,
+              '${me?.name ?? 'Spieler'} (${myTeam?.name ?? ''}) $what – ${g.liveMin} min live sichtbar',
+              myTeam?.color ?? 0xFFFF4D4D));
+        }
+      } else {
+        _outsideSince = null;
+        _exitTriggered = false;
+        final d = [distToEdge ?? double.infinity, distToBlocked ?? double.infinity]
+            .reduce((a, b) => a < b ? a : b);
+        if (d < 50 && !_edgeWarned) {
+          _edgeWarned = true;
+          HapticFeedback.heavyImpact();
+        } else if (d > 80) {
+          _edgeWarned = false;
+        }
+      }
+    }
+
+    // Jäger: Sperrgebiet nur Warnung + Meldung an die Spielleitung
+    if (g != null && g.isRunning && isHunter && !(me?.observer ?? false)) {
+      final z = inBlocked;
+      if (z != null && _hunterWarnedZone != z.id) {
+        _hunterWarnedZone = z.id;
+        HapticFeedback.vibrate();
+        await _safe(() => _repo.addEvent(
+            code, '${me?.name ?? 'Jäger'} (Jäger) ist im Sperrgebiet „${z.name}“', PH.hunterColor));
+      } else if (z == null) {
+        _hunterWarnedZone = null;
+        final d = distToBlocked ?? double.infinity;
+        if (d < 50 && !_edgeWarned) {
+          _edgeWarned = true;
+          HapticFeedback.heavyImpact();
+        } else if (d > 80) {
+          _edgeWarned = false;
+        }
+      }
     }
 
     // Live-Sichtbarkeit nach Verlassen der Zone

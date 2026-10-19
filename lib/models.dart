@@ -33,10 +33,15 @@ class Zone {
   final List<LatLng> points;
   final String scope; // all, team, player
   final String? target; // teamId oder uid
+  final String kind; // mark = Markierung, blocked = Sperrgebiet
 
-  const Zone(this.id, this.name, this.color, this.points, this.scope, this.target);
+  const Zone(this.id, this.name, this.color, this.points, this.scope, this.target,
+      {this.kind = 'mark'});
+
+  bool get isBlocked => kind == 'blocked';
 
   bool visibleTo(String? uid, String? teamId) {
+    if (isBlocked) return true;
     if (scope == 'team') return target != null && target == teamId;
     if (scope == 'player') return target != null && target == uid;
     return true;
@@ -48,6 +53,7 @@ class Zone {
         'color': color,
         'scope': scope,
         'target': target,
+        'kind': kind,
         'points': [for (final p in points) {'lat': p.latitude, 'lng': p.longitude}],
       };
 
@@ -66,6 +72,7 @@ class Zone {
       pts,
       (m['scope'] as String?) ?? 'all',
       m['target'] as String?,
+      kind: (m['kind'] as String?) == 'blocked' ? 'blocked' : 'mark',
     );
   }
 }
@@ -108,6 +115,8 @@ class Game {
     this.pingRequestAt,
     this.zones = const [],
   });
+
+  List<Zone> get blockedZones => [for (final z in zones) if (z.isBlocked) z];
 
   bool get isRunning => status == 'running';
   bool get isLobby => status == 'lobby';

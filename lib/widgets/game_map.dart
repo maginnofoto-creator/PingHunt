@@ -183,9 +183,9 @@ class GameMap extends StatelessWidget {
             for (final z in zones)
               Polygon(
                 points: z.points,
-                color: Color(z.color).withOpacity(0.2),
+                color: Color(z.color).withOpacity(z.isBlocked ? 0.38 : 0.2),
                 borderColor: Color(z.color),
-                borderStrokeWidth: 2,
+                borderStrokeWidth: z.isBlocked ? 3.5 : 2,
               ),
           ]),
         if (polylines.isNotEmpty) PolylineLayer(polylines: polylines),
@@ -204,7 +204,7 @@ class GameMap extends StatelessWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      z.name,
+                      z.isBlocked ? '⛔ ${z.name}' : z.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: PH.bg),

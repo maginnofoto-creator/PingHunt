@@ -373,6 +373,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (me?.isCaught ?? false) {
       chips.add(const Pill(dot: PH.danger, child: Text('Gefangen')));
     }
+    if (_engine.inBlocked != null) {
+      chips.add(Pill(
+        filled: PH.danger,
+        child: Text('IM SPERRGEBIET: ${_engine.inBlocked!.name}',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: PH.bg)),
+      ));
+    } else if ((_engine.distToBlocked ?? double.infinity) < 50) {
+      chips.add(Pill(dot: PH.danger, child: Text('Sperrgebiet in ${_engine.distToBlocked!.round()} m')));
+    }
     if (g.area.length >= 3 && _engine.inside != null) {
       final d = _engine.distToEdge;
       chips.add(Pill(
