@@ -6,12 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../chat.dart';
 import '../models.dart';
+import '../notify.dart';
 import '../repo.dart';
 import '../theme.dart';
 import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 import 'area_editor.dart';
+import 'chat_screen.dart';
 
 /// Spielleitung – auf dem Handy als Tabs, im Browser als großes Dashboard.
 class LeaderScreen extends StatefulWidget {
@@ -38,16 +41,66 @@ class _LeaderScreenState extends State<LeaderScreen> {
 
   final _subs = <StreamSubscription>[];
   Timer? _clock;
+  late final ChatWatcher _chat;
+  String _chatKey = '';
+
+  void _updateChat() {
+    final g = _game;
+    final channels = <String, String>{
+      'all': 'Durchsage',
+      if (g != null)
+        for (final t in g.teamList) 'team:${t.id}': t.name,
+      for (final p in _players) 'dm:${p.uid}': p.name,
+    };
+    final key = (channels.keys.toList()..sort()).join(',');
+    if (key == _chatKey) return;
+    _chatKey = key;
+    _chat.watch(channels);
+  }
+
+  void _openChatList(Game g) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Nachrichten')),
+          body: LeaderChatList(watcher: _chat, game: g, players: _players),
+        ),
+      ),
+    );
+  }
+
+  Widget _chatAction(Game g) => Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: UnreadBadge(
+          count: _chat.totalUnread,
+          child: IconButton(
+            tooltip: 'Nachrichten',
+            onPressed: () => _openChatList(g),
+            icon: const Icon(Icons.chat_bubble_outline),
+          ),
+        ),
+      );
 
   @override
   void initState() {
     super.initState();
     final c = widget.code;
-    _subs.add(_repo.gameStream(c).listen((g) => setState(() {
-          _game = g;
-          _loaded = true;
-        })));
-    _subs.add(_repo.playersStream(c).listen((p) => setState(() => _players = p)));
+    _chat = ChatWatcher(c)..addListener(() {
+        if (mounted) setState(() {});
+      });
+    Notify.init();
+    _subs.add(_repo.gameStream(c).listen((g) {
+      setState(() {
+        _game = g;
+        _loaded = true;
+      });
+      _updateChat();
+    }));
+    _subs.add(_repo.playersStream(c).listen((p) {
+      setState(() => _players = p);
+      _updateChat();
+    }));
     _subs.add(_repo.pingsStream(c).listen((p) => setState(() => _pings = p)));
     _subs.add(_repo.liveStream(c).listen((l) => setState(() => _live = l), onError: (_) {}));
     _subs.add(_repo.eventsStream(c).listen((e) => setState(() => _events = e)));
@@ -63,6 +116,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
       s.cancel();
     }
     _clock?.cancel();
+    _chat.dispose();
     super.dispose();
   }
 
@@ -725,9 +779,28 @@ class _LeaderScreenState extends State<LeaderScreen> {
               if (v == 'free') _do(() => _repo.setPlayerStatus(g.code, p.uid, 'free'));
               if (v == 'none') _do(() => _repo.setPlayerTeam(g.code, p.uid, null));
               if (v == 'remove') _do(() => _repo.removePlayer(g.code, p.uid));
+              if (v == 'msg') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => Scaffold(
+                      appBar: AppBar(title: Text(p.name)),
+                      body: ChatThread(
+                        watcher: _chat,
+                        channel: 'dm:${p.uid}',
+                        myName: 'Spielleitung',
+                        fromLeader: true,
+                        emptyText: 'Privater Chat mit ${p.name}.',
+                      ),
+                    ),
+                  ),
+                );
+              }
               if (v.startsWith('team:')) _do(() => _repo.setPlayerTeam(g.code, p.uid, v.substring(5)));
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'msg', child: Text('Nachricht schreiben')),
+              const PopupMenuDivider(),
               for (final t in g.teamList)
                 if (t.id != p.teamId)
                   PopupMenuItem(value: 'team:${t.id}', child: Text('→ ${t.name}')),
@@ -855,6 +928,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
           appBar: AppBar(
             title: Text('PINGHUNT · Spiel ${g.code} · Spielleitung',
                 style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+            actions: [_chatAction(g)],
           ),
           body: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -875,23 +949,51 @@ class _LeaderScreenState extends State<LeaderScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                SizedBox(width: 320, child: ListView(children: [_eventsPanel(now)])),
+                SizedBox(
+                  width: 340,
+                  child: DefaultTabController(
+                    length: 2,
+                    child: Column(
+                      children: [
+                        TabBar(
+                          tabs: [
+                            const Tab(text: 'Ereignisse'),
+                            Tab(
+                              child: UnreadBadge(count: _chat.totalUnread, child: const Text('Nachrichten')),
+                            ),
+                          ],
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              ListView(children: [_eventsPanel(now)]),
+                              LeaderChatList(watcher: _chat, game: g, players: _players),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         );
       }
       return DefaultTabController(
-        length: 4,
+        length: 5,
         child: Scaffold(
           appBar: AppBar(
             title: Text('Spielleitung · ${g.code}', style: const TextStyle(fontWeight: FontWeight.w800)),
-            bottom: const TabBar(
+            bottom: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
               tabs: [
-                Tab(text: 'Karte'),
-                Tab(text: 'Teams'),
-                Tab(text: 'Spiel'),
-                Tab(text: 'Ereignisse'),
+                const Tab(text: 'Karte'),
+                const Tab(text: 'Teams'),
+                const Tab(text: 'Spiel'),
+                Tab(child: UnreadBadge(count: _chat.totalUnread, child: const Text('Chat'))),
+                const Tab(text: 'Ereignisse'),
               ],
             ),
           ),
@@ -901,6 +1003,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
               _mapView(g, now),
               ListView(padding: const EdgeInsets.all(12), children: [_teamsPanel(g, now)]),
               ListView(padding: const EdgeInsets.all(12), children: [_gamePanel(g, now)]),
+              LeaderChatList(watcher: _chat, game: g, players: _players),
               ListView(padding: const EdgeInsets.all(12), children: [_eventsPanel(now)]),
             ],
           ),

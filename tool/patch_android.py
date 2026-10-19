@@ -47,6 +47,14 @@ def patch_app_gradle():
         text = re.sub(r"minSdkVersion\s+flutter\.minSdkVersion", "minSdkVersion 23", text)
         text = re.sub(r"compileSdk\s*=\s*flutter\.compileSdkVersion", "compileSdk = 35", text)
         text = re.sub(r"targetSdk\s*=\s*flutter\.targetSdkVersion", "targetSdk = 34", text)
+        # Desugaring für flutter_local_notifications
+        if "coreLibraryDesugaring" not in text:
+            if name.endswith(".kts"):
+                text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
+                text += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")\n}\n'
+            else:
+                text = text.replace("compileOptions {", "compileOptions {\n        coreLibraryDesugaringEnabled true", 1)
+                text += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'\n}\n"
         path.write_text(text, encoding="utf-8")
         print(f"{name} angepasst")
 

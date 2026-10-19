@@ -160,6 +160,39 @@ class Repo {
     return q.snapshots().map((s) => s.docs.map(LivePos.fromDoc).whereType<LivePos>().toList());
   }
 
+  // ---------- Nachrichten ----------
+
+  CollectionReference<Map<String, dynamic>> _msgs(String code) =>
+      gameRef(code).collection('messages');
+
+  /// Nachrichten eines Kanals (ohne orderBy, damit kein Index nötig ist; sortiert wird in der App).
+  Stream<List<ChatMsg>> messagesStream(String code, String channel) => _msgs(code)
+      .where('channel', isEqualTo: channel)
+      .snapshots()
+      .map((q) => q.docs.map(ChatMsg.fromDoc).whereType<ChatMsg>().toList()
+        ..sort((a, b) => a.t.compareTo(b.t)));
+
+  Future<void> sendMessage(
+    String code, {
+    required String channel,
+    required String fromName,
+    required bool fromLeader,
+    required String text,
+    String kind = 'text',
+    LatLng? pos,
+  }) =>
+      _msgs(code).add({
+        'channel': channel,
+        'from': uid,
+        'fromName': fromName,
+        'fromLeader': fromLeader,
+        'text': text,
+        'kind': kind,
+        if (pos != null) 'lat': pos.latitude,
+        if (pos != null) 'lng': pos.longitude,
+        't': Timestamp.fromDate(DateTime.now()),
+      });
+
   Stream<List<GameEvent>> eventsStream(String code) => _events(code)
       .orderBy('t', descending: true)
       .limit(200)

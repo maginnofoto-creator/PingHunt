@@ -322,3 +322,40 @@ class TrailPos {
         m['teamId'] as String?, LatLng(lat, lng), t);
   }
 }
+
+/// Chat-Nachricht. Kanäle: 'all' (Durchsage), 'dm:<uid>' (Spieler ↔ Spielleitung),
+/// 'team:<teamId>' (Team-Chat, Spielleitung liest mit).
+class ChatMsg {
+  final String id;
+  final String channel;
+  final String from;
+  final String fromName;
+  final bool fromLeader;
+  final String text;
+  final String kind; // text, quick, loc
+  final LatLng? pos;
+  final DateTime t;
+
+  ChatMsg(this.id, this.channel, this.from, this.fromName, this.fromLeader, this.text, this.kind,
+      this.pos, this.t);
+
+  static ChatMsg? fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final m = doc.data();
+    if (m == null) return null;
+    final t = _ts(m['t']);
+    if (t == null) return null;
+    final lat = _dbl(m['lat']);
+    final lng = _dbl(m['lng']);
+    return ChatMsg(
+      doc.id,
+      (m['channel'] as String?) ?? '',
+      (m['from'] as String?) ?? '',
+      (m['fromName'] as String?) ?? '',
+      m['fromLeader'] == true,
+      (m['text'] as String?) ?? '',
+      (m['kind'] as String?) ?? 'text',
+      lat != null && lng != null ? LatLng(lat, lng) : null,
+      t,
+    );
+  }
+}

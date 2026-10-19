@@ -2,13 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
+import '../chat.dart';
 import '../models.dart';
+import '../notify.dart';
 import '../player_engine.dart';
 import '../repo.dart';
 import '../theme.dart';
 import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
+import 'chat_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key, required this.code, this.observer = false});
@@ -26,6 +30,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _repo = Repo.i;
   final _map = MapController();
   late final PlayerEngine _engine;
+  late final ChatWatcher _chat;
+  String _chatKey = '';
+  LatLng? _sharedPin;
+  DateTime? _sharedPinAt;
 
   Game? _game;
   List<Player> _players = [];
@@ -54,6 +62,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     _engine = PlayerEngine(widget.code)..addListener(_onEngine);
+    _chat = ChatWatcher(widget.code, notify: !widget.observer)..addListener(_onEngine);
+    Notify.init();
+    _updateChat(null);
     if (!widget.observer) _engine.start();
     if (widget.observer) {
       _subs.add(_repo.eventsStream(widget.code).listen((e) => setState(() => _events = e)));
@@ -70,11 +81,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final me = _me;
       _engine.update(_game, me);
       if (me?.teamId != _liveTeam) _subscribeLive(me?.teamId);
+      _updateChat(me);
     }));
     _subs.add(_repo.pingsStream(widget.code).listen((ps) => setState(() => _pings = ps)));
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  void _updateChat(Player? me) {
+    final team = _game?.team(me?.teamId);
+    final key = '${team?.id}|${team?.name}';
+    if (key == _chatKey) return;
+    _chatKey = key;
+    _chat.watch({
+      'all': 'Durchsage',
+      'dm:${_repo.uid}': 'Spielleitung',
+      if (team != null) 'team:${team.id}': team.name,
+    });
+  }
+
+  Future<void> _openChat(Game g, Player? me) async {
+    final pos = await Navigator.push<LatLng>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlayerChatScreen(
+          watcher: _chat,
+          myName: me?.name ?? 'Spieler',
+          team: g.team(me?.teamId),
+          myPos: widget.observer ? null : () => _engine.latLng,
+        ),
+      ),
+    );
+    if (pos != null && mounted) {
+      setState(() {
+        _sharedPin = pos;
+        _sharedPinAt = DateTime.now();
+      });
+      _map.move(pos, 17);
+    }
   }
 
   void _onEngine() {
@@ -105,6 +150,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _liveSub?.cancel();
     _clock?.cancel();
     _engine.removeListener(_onEngine);
+    _chat.removeListener(_onEngine);
+    _chat.dispose();
     _engine.dispose();
     super.dispose();
   }
@@ -189,6 +236,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ));
     }
 
+    if (_sharedPin != null &&
+        _sharedPinAt != null &&
+        now.difference(_sharedPinAt!).inMinutes < 10) {
+      markers.add(labelMarker(
+        point: _sharedPin!,
+        color: PH.accent,
+        label: '📍 geteilt',
+        size: 16,
+        ring: true,
+      ));
+    }
+
     final pos = _engine.latLng;
     if (pos != null) {
       markers.add(labelMarker(
@@ -260,6 +319,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     _statusCard(g, me, myTeam, now),
                   ],
                 )),
+              ),
+            ),
+            Positioned(
+              right: 12,
+              bottom: (isHunter ? 196 : 120) + 52,
+              child: UnreadBadge(
+                count: _chat.totalUnread,
+                child: FloatingActionButton.small(
+                  heroTag: 'chat',
+                  backgroundColor: PH.accent,
+                  foregroundColor: PH.bg,
+                  tooltip: 'Nachrichten',
+                  onPressed: () => _openChat(g, me),
+                  child: const Icon(Icons.chat_bubble),
+                ),
               ),
             ),
             Positioned(
