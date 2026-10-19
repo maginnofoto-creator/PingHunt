@@ -23,6 +23,9 @@ class ChatWatcher extends ChangeNotifier {
   final Set<String> _notified = {};
   String? openChannel;
 
+  /// Letzter Fehler beim Laden (wird im Chat angezeigt).
+  String? error;
+
   /// Setzt die beobachteten Kanäle (Kanal → Titel für Benachrichtigungen).
   void watch(Map<String, String> channels) {
     _titles
@@ -39,9 +42,14 @@ class ChatWatcher extends ChangeNotifier {
       _loadRead(ch);
       _subs[ch] = _repo.messagesStream(code, ch).listen((list) {
         messages[ch] = list;
+        error = null;
         _maybeNotify(ch, list);
         notifyListeners();
-      }, onError: (Object e) => debugPrint('Chat $ch: $e'));
+      }, onError: (Object e) {
+        debugPrint('Chat $ch: $e');
+        error = 'Nachrichten konnten nicht geladen werden: $e';
+        notifyListeners();
+      });
     }
     notifyListeners();
   }

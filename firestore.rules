@@ -80,12 +80,8 @@ service cloud.firestore {
 
       // Nachrichten: Durchsagen (all), privat mit der Spielleitung (dm:<uid>), Team-Chat (team:<teamId>).
       match /messages/{msgId} {
-        allow read: if isLeader(code) ||
-          (signedIn() && (
-            resource.data.channel == 'all' ||
-            resource.data.channel == 'dm:' + request.auth.uid ||
-            resource.data.channel == 'team:' + string(myTeam(code))
-          ));
+        // Lesen: alle angemeldeten Spieler; die App lädt nur die eigenen Kanäle.
+        allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.from == request.auth.uid && (
           isLeader(code) || (
             request.resource.data.fromLeader == false && (

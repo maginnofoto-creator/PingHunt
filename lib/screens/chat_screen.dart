@@ -101,6 +101,13 @@ class _ChatThreadState extends State<ChatThread> {
     final me = Repo.i.uid;
     return Column(
       children: [
+        if (widget.watcher.error != null)
+          Container(
+            width: double.infinity,
+            color: PH.danger.withOpacity(0.2),
+            padding: const EdgeInsets.all(10),
+            child: Text(widget.watcher.error!, style: const TextStyle(fontSize: 12)),
+          ),
         Expanded(
           child: msgs.isEmpty
               ? Center(child: Text(widget.emptyText, style: const TextStyle(color: PH.muted)))

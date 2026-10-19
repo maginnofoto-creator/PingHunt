@@ -75,6 +75,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _gameLoaded = true;
       });
       _engine.update(g, _me);
+      _updateChat(_me);
     }));
     _subs.add(_repo.playersStream(widget.code).listen((ps) {
       setState(() => _players = ps);
