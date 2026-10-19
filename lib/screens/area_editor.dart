@@ -120,7 +120,7 @@ class _AreaEditorState extends State<AreaEditor> {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: FlutterMap(
+                  child: StyledMap(
                     mapController: _map,
                     options: MapOptions(
                       initialCenter: _fitPts.isNotEmpty ? _fitPts.first : const LatLng(51.16, 10.45),
@@ -140,7 +140,6 @@ class _AreaEditorState extends State<AreaEditor> {
                       },
                     ),
                     children: [
-                      darkTiles(context),
                       if (widget.reference.length >= 3)
                         PolygonLayer(polygons: [
                           Polygon(

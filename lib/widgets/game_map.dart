@@ -1,12 +1,135 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../geo.dart';
 import '../models.dart';
 import '../theme.dart';
 
 const _fallbackCenter = LatLng(51.16, 10.45); // Mitte Deutschlands
+
+/// Kartenstil: map = dunkle Karte, sat = Satellit, hybrid = Satellit + Straßennamen.
+final mapStyle = ValueNotifier<String>('map');
+bool _styleLoaded = false;
+
+Future<void> _loadStyle() async {
+  if (_styleLoaded) return;
+  _styleLoaded = true;
+  try {
+    final p = await SharedPreferences.getInstance();
+    final v = p.getString('mapStyle');
+    if (v == 'map' || v == 'sat' || v == 'hybrid') mapStyle.value = v!;
+  } catch (_) {}
+}
+
+Future<void> _saveStyle(String v) async {
+  mapStyle.value = v;
+  try {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('mapStyle', v);
+  } catch (_) {}
+}
+
+const _esri = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+
+/// Kartenkacheln passend zum gewählten Stil (inkl. Quellenangabe und Umschalter).
+List<Widget> baseLayers(BuildContext context, String style) => [
+      if (style == 'map')
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'de.pinghunt.pinghunt',
+          maxZoom: 19,
+          tileBuilder: darkModeTileBuilder,
+        )
+      else ...[
+        TileLayer(
+          urlTemplate: '$_esri/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          userAgentPackageName: 'de.pinghunt.pinghunt',
+          maxNativeZoom: 19,
+          maxZoom: 20,
+        ),
+        if (style == 'hybrid') ...[
+          TileLayer(
+            urlTemplate: '$_esri/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'de.pinghunt.pinghunt',
+            maxNativeZoom: 19,
+            maxZoom: 20,
+          ),
+          TileLayer(
+            urlTemplate: '$_esri/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'de.pinghunt.pinghunt',
+            maxNativeZoom: 19,
+            maxZoom: 20,
+          ),
+        ],
+      ],
+    ];
+
+/// Quellenangabe und Stil-Umschalter – als letzte Kinder einer FlutterMap.
+List<Widget> mapOverlays(String style) => [
+      SimpleAttributionWidget(
+        source: Text(style == 'map'
+            ? '© OpenStreetMap-Mitwirkende'
+            : 'Esri, Maxar, Earthstar Geographics'),
+        backgroundColor: const Color(0xAA0B0E13),
+      ),
+      const Align(alignment: Alignment.centerRight, child: MapStyleButton()),
+    ];
+
+/// Kleiner Knopf rechts auf der Karte: Karte / Satellit / Satellit + Straßen.
+class MapStyleButton extends StatelessWidget {
+  const MapStyleButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    _loadStyle();
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: ValueListenableBuilder<String>(
+        valueListenable: mapStyle,
+        builder: (context, style, _) => Material(
+          color: PH.surface.withOpacity(0.95),
+          shape: const CircleBorder(side: BorderSide(color: PH.line)),
+          child: PopupMenuButton<String>(
+            tooltip: 'Kartenansicht',
+            icon: Icon(style == 'map' ? Icons.map_outlined : Icons.satellite_alt, color: PH.text),
+            color: PH.surface2,
+            onSelected: _saveStyle,
+            itemBuilder: (_) => [
+              CheckedPopupMenuItem(value: 'map', checked: style == 'map', child: const Text('Karte')),
+              CheckedPopupMenuItem(value: 'sat', checked: style == 'sat', child: const Text('Satellit')),
+              CheckedPopupMenuItem(
+                  value: 'hybrid', checked: style == 'hybrid', child: const Text('Satellit + Straßen')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Karte, die automatisch dem gewählten Stil folgt.
+class StyledMap extends StatelessWidget {
+  const StyledMap({super.key, required this.mapController, required this.options, required this.children});
+
+  final MapController mapController;
+  final MapOptions options;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    _loadStyle();
+    return ValueListenableBuilder<String>(
+      valueListenable: mapStyle,
+      builder: (context, style, _) => FlutterMap(
+        mapController: mapController,
+        options: options,
+        children: [...baseLayers(context, style), ...children, ...mapOverlays(style)],
+      ),
+    );
+  }
+}
 
 /// Gemeinsame Karte für Spieler, Spielleitung und Zuschauer.
 class GameMap extends StatelessWidget {
@@ -29,7 +152,7 @@ class GameMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FlutterMap(
+    return StyledMap(
       mapController: controller,
       options: MapOptions(
         initialCenter: initialCenter ?? (area.isNotEmpty ? area.first : _fallbackCenter),
@@ -46,7 +169,6 @@ class GameMap extends StatelessWidget {
         backgroundColor: PH.bg,
       ),
       children: [
-        darkTiles(context),
         if (area.length >= 3)
           PolygonLayer(polygons: [
             Polygon(
@@ -92,21 +214,10 @@ class GameMap extends StatelessWidget {
               ),
           ]),
         MarkerLayer(markers: markers),
-        const SimpleAttributionWidget(
-          source: Text('© OpenStreetMap-Mitwirkende'),
-          backgroundColor: Color(0xAA0B0E13),
-        ),
       ],
     );
   }
 }
-
-Widget darkTiles(BuildContext context) => TileLayer(
-      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      userAgentPackageName: 'de.pinghunt.pinghunt',
-      maxZoom: 19,
-      tileBuilder: darkModeTileBuilder,
-    );
 
 /// Punkt mit Namensschild darunter; der Punkt liegt genau auf der Position.
 Marker labelMarker({
