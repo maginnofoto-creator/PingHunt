@@ -90,6 +90,24 @@ class Tracker {
   }
 }
 
+final Set<String> _liveNotified = {};
+
+/// Jäger: Benachrichtigung, sobald ein Gejagter live sichtbar wird.
+void _notifyLive(Game? g, Player me, List<Player> all) {
+  if (g == null || !g.isRunning || me.observer) return;
+  if (!(g.team(me.teamId)?.isHunter ?? false)) return;
+  final now = DateTime.now();
+  for (final p in all) {
+    final t = g.team(p.teamId);
+    if (t == null || t.isHunter || p.observer || !p.isLive(now)) continue;
+    final key = '${p.uid}_${p.liveUntil!.millisecondsSinceEpoch}';
+    if (!_liveNotified.add(key)) continue;
+    final mins = (p.liveUntil!.difference(now).inSeconds / 60).ceil();
+    Notify.message('🔴 ${p.name} ist LIVE!', '${p.name} (${t.name}) ist $mins Minuten live sichtbar.',
+        important: true);
+  }
+}
+
 @pragma('vm:entry-point')
 Future<void> trackerMain(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -180,7 +198,31 @@ Future<void> trackerMain(ServiceInstance service) async {
       me = mine;
       eng.update(game, mine);
       refreshChat();
+      _notifyLive(game, mine, ps);
     }));
+
+    // Jäger: Benachrichtigung bei neuen Pings (gebündelt)
+    final startedAt = DateTime.now();
+    final seenPings = <String>{};
+    final pendingPings = <String>{};
+    Timer? pingDebounce;
+    subs.add(repo.pingsStream(code).listen((pings) {
+      final g = game, m = me;
+      final hunter = g != null && m != null && !m.observer && (g.team(m.teamId)?.isHunter ?? false);
+      for (final p in pings) {
+        if (!seenPings.add(p.id)) continue;
+        if (!hunter || p.t.isBefore(startedAt.subtract(const Duration(minutes: 1)))) continue;
+        pendingPings.add(p.uid);
+      }
+      if (pendingPings.isEmpty) return;
+      pingDebounce?.cancel();
+      pingDebounce = Timer(const Duration(seconds: 15), () {
+        final n = pendingPings.length;
+        pendingPings.clear();
+        Notify.message('📍 Neue Pings', n == 1 ? '1 Gejagter wurde geortet.' : '$n Gejagte wurden geortet.',
+            important: true);
+      });
+    }, onError: (_) {}));
 
     await eng.start();
 

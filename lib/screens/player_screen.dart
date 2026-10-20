@@ -329,6 +329,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     _chips(g, me, myTeam),
                     const SizedBox(height: 8),
                     _statusCard(g, me, myTeam, now),
+                    ..._liveBanners(g, myTeam, now),
                   ],
                 )),
               ),
@@ -415,6 +416,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       );
     });
+  }
+
+  /// Jäger: roter Balken je Gejagtem, der gerade live sichtbar ist.
+  List<Widget> _liveBanners(Game g, Team? myTeam, DateTime now) {
+    if (myTeam == null || !myTeam.isHunter) return const [];
+    final live = _players.where((p) {
+      final t = g.team(p.teamId);
+      return t != null && !t.isHunter && !p.observer && p.exposed != null && p.isLive(now);
+    }).toList();
+    return [
+      for (final p in live)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Material(
+            color: PH.danger,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _map.move(p.exposed!, 17),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.radar, color: PH.bg, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'LIVE: ${p.name} (${g.team(p.teamId)!.name}) · noch ${countdown(p.liveUntil!.difference(now))}',
+                        style: const TextStyle(color: PH.bg, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: PH.bg),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 
   Widget _limitWidth(Widget child) => widget.observer
