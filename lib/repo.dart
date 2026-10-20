@@ -259,6 +259,29 @@ class Repo {
     await ref.set(data);
   }
 
+  /// Spiel mit allen Daten löschen (nur Spielleitung).
+  Future<void> deleteGame(String code) async {
+    for (final sub in ['pings', 'trail', 'live', 'messages', 'events', 'players', 'secret']) {
+      while (true) {
+        final q = await gameRef(code).collection(sub).limit(300).get();
+        if (q.docs.isEmpty) break;
+        final batch = _db.batch();
+        for (final d in q.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+      }
+    }
+    final leaders = await gameRef(code).collection('leaders').get();
+    for (final d in leaders.docs) {
+      if (d.id != uid) await d.reference.delete();
+    }
+    await gameRef(code).delete();
+    try {
+      await gameRef(code).collection('leaders').doc(uid).delete();
+    } catch (_) {}
+  }
+
   Future<Player?> getMyPlayer(String code) async {
     final s = await _players(code).doc(uid).get();
     return s.exists ? Player.fromDoc(s) : null;

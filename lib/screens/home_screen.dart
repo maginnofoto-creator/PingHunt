@@ -5,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../repo.dart';
 import '../theme.dart';
+import '../legal.dart';
 import '../tracker.dart';
+import 'info_screen.dart';
 import 'leader_screen.dart';
 import 'player_screen.dart';
 import 'scan_screen.dart';
@@ -83,6 +85,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Einwilligung einmal pro Gerät (bzw. bei neuer Version der Datenschutzerklärung).
+  Future<bool> _ensureConsent() async {
+    final p = await SharedPreferences.getInstance();
+    if ((p.getInt('consent') ?? 0) >= Legal.consentVersion) return true;
+    if (!mounted) return false;
+    final ok = await askConsent(context);
+    if (ok) await p.setInt('consent', Legal.consentVersion);
+    return ok;
+  }
+
   Future<void> _join() => _run(() async {
         final code = _validCode();
         if (code == null) return;
@@ -97,6 +109,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
         await _remember(code);
+        if (!mounted) return;
+        if (!await Repo.i.isLeader(game) && !kIsWeb && !await _ensureConsent()) return;
         if (!mounted) return;
         if (await Repo.i.isLeader(game)) {
           _open(LeaderScreen(code: code));
@@ -125,6 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
         await _remember(code);
+        if (!await _ensureConsent()) return;
         await Repo.i.joinAsPlayer(code, name, observer: true);
         _msg('Beigetreten. Die Spielleitung teilt dich jetzt einem Team zu.');
         _open(PlayerScreen(code: code, observer: true));
@@ -203,7 +218,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    tooltip: 'Über PingHunt & Datenschutz',
+                    icon: const Icon(Icons.info_outline),
+                    onPressed: () => _open(const InfoScreen()),
+                  ),
+                ),
                 const Text('PINGHUNT',
                     style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: 6)),
                 const SizedBox(height: 6),

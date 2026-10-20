@@ -63,6 +63,7 @@ jobs:
       - name: Browser-Version bauen
         run: |
           flutter build web --release --base-href "/${{ github.event.repository.name }}/" --dart-define-from-file=config.json 2>&1 | tee build-web.log
+          cp -r static/. build/web/
           rm -f config.json
 
       - name: APK als Download veröffentlichen

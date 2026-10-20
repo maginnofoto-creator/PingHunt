@@ -397,12 +397,34 @@ class _LeaderScreenState extends State<LeaderScreen> {
               label: const Text('Spiel beenden'),
             ),
           ],
-          if (g.isEnded)
+          if (g.isEnded) ...[
             OutlinedButton.icon(
               onPressed: () => _do(() => _repo.updateGame(g.code, {'status': 'lobby'})),
               icon: const Icon(Icons.replay),
               label: const Text('Zurück in die Lobby'),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: PH.danger),
+              onPressed: () async {
+                final ok = await confirm(
+                  context,
+                  'Spiel endgültig löschen?',
+                  'Alle Standorte, Pings, Nachrichten, Ereignisse und Spieler dieses Spiels werden '
+                      'gelöscht. Das kann nicht rückgängig gemacht werden.',
+                );
+                if (!ok) return;
+                try {
+                  await _repo.deleteGame(g.code);
+                  if (mounted) Navigator.of(context).pop();
+                } catch (e) {
+                  _msg('Löschen fehlgeschlagen: $e');
+                }
+              },
+              icon: const Icon(Icons.delete_forever),
+              label: const Text('Spiel mit allen Daten löschen'),
+            ),
+          ],
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: () => Navigator.push(

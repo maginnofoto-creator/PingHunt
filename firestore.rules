@@ -59,6 +59,7 @@ service cloud.firestore {
       // Live-Positionen: nur das eigene Team und die Spielleitung.
       match /live/{playerId} {
         allow write: if signedIn() && playerId == request.auth.uid;
+        allow delete: if isLeader(code);
         allow read: if isLeader(code) || (
           signedIn() && resource.data.teamId != null && resource.data.teamId == myTeam(code)
         );
