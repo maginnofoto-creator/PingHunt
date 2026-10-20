@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../repo.dart';
 import '../theme.dart';
+import '../config.dart';
 import '../legal.dart';
 import '../tracker.dart';
 import 'info_screen.dart';
@@ -226,8 +227,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () => _open(const InfoScreen()),
                   ),
                 ),
-                const Text('PINGHUNT',
-                    style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: 6)),
+                Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.asset('assets/icon/logo.png', width: 64, height: 64),
+                    ),
+                    const SizedBox(width: 14),
+                    const Text('PINGHUNT',
+                        style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: 6)),
+                  ],
+                ),
                 const SizedBox(height: 6),
                 const Text('Jäger und Gejagte – per GPS',
                     style: TextStyle(color: PH.muted, fontSize: 15)),
@@ -298,6 +308,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: _busy ? null : _claimLeader,
                   icon: const Icon(Icons.key),
                   label: const Text('Spielleitung mit PIN übernehmen'),
+                ),
+                const SizedBox(height: 24),
+                Center(
+                  child: Text('PingHunt ${AppConfig.version} · von ${Legal.developer}',
+                      style: const TextStyle(color: PH.muted, fontSize: 12)),
                 ),
                 if (_busy) ...[
                   const SizedBox(height: 20),

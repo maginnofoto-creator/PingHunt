@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config.dart';
 import '../legal.dart';
 import '../theme.dart';
 import '../widgets/ui.dart';
@@ -19,10 +20,21 @@ class InfoScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              const Text('PINGHUNT',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: 6)),
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Image.asset('assets/icon/logo.png', width: 120, height: 120),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Center(
+                child: Text('PINGHUNT', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: 6)),
+              ),
               const SizedBox(height: 4),
-              const Text('Jäger und Gejagte – per GPS', style: TextStyle(color: PH.muted)),
+              Center(
+                child: Text('Version ${AppConfig.version} · Jäger und Gejagte – per GPS',
+                    style: const TextStyle(color: PH.muted)),
+              ),
               const SizedBox(height: 24),
               Panel(
                 child: Column(

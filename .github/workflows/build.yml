@@ -54,15 +54,23 @@ jobs:
 
       - run: flutter pub get 2>&1 | tee pub-get.log
 
+      - name: App-Symbol erzeugen
+        run: |
+          set -o pipefail
+          dart run flutter_launcher_icons 2>&1 | tee icons.log
+
       - name: Android-App bauen
         run: |
-          flutter build apk --release --build-number=${{ github.run_number }} --dart-define-from-file=config.json 2>&1 | tee build-apk.log
+          set -o pipefail
+          flutter build apk --release --build-name=1.0.${{ github.run_number }} --build-number=${{ github.run_number }} --dart-define-from-file=config.json --dart-define=APP_VERSION=1.0.${{ github.run_number }} 2>&1 | tee build-apk.log
           mkdir -p out
+          cp build/app/outputs/flutter-apk/app-release.apk out/PingHunt-1.0.${{ github.run_number }}.apk
           cp build/app/outputs/flutter-apk/app-release.apk out/PingHunt.apk
 
       - name: Browser-Version bauen
         run: |
-          flutter build web --release --base-href "/${{ github.event.repository.name }}/" --dart-define-from-file=config.json 2>&1 | tee build-web.log
+          set -o pipefail
+          flutter build web --release --base-href "/${{ github.event.repository.name }}/" --dart-define-from-file=config.json --dart-define=APP_VERSION=1.0.${{ github.run_number }} 2>&1 | tee build-web.log
           cp -r static/. build/web/
           rm -f config.json
 
@@ -71,8 +79,13 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: PingHunt 1.0.${{ github.run_number }}
-          body: Neue Version von PingHunt. Lade unten PingHunt.apk herunter und installiere sie auf dem Handy.
-          files: out/PingHunt.apk
+          body: |
+            PingHunt Version 1.0.${{ github.run_number }}.
+            Lade unten PingHunt-1.0.${{ github.run_number }}.apk herunter und installiere sie auf dem Handy.
+            (PingHunt.apk ist dieselbe Datei – für den festen Download-Link.)
+          files: |
+            out/PingHunt-1.0.${{ github.run_number }}.apk
+            out/PingHunt.apk
           make_latest: true
 
       - uses: actions/upload-pages-artifact@v3

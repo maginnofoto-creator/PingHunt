@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 /// Firebase-Zugangsdaten. Sie werden beim Bauen auf GitHub aus dem
 /// Secret FIREBASE_CONFIG eingesetzt (siehe README.md).
 class AppConfig {
+  /// Versionsnummer, wird beim Bauen auf GitHub gesetzt (z. B. 1.0.18).
+  static const version = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+
   static const apiKey = String.fromEnvironment('apiKey');
   static const projectId = String.fromEnvironment('projectId');
   static const messagingSenderId = String.fromEnvironment('messagingSenderId');

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs><radialGradient id="bg" cx="50%" cy="38%" r="70%"><stop offset="0" stop-color="#1A212B"/><stop offset="1" stop-color="#0B0E13"/></radialGradient></defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <g transform="translate(512 540) scale(1.0) translate(-512 -546)">  <g fill="none" stroke-linecap="round">
+    <ellipse cx="512" cy="742" rx="350" ry="104" stroke="#FF6B2C" stroke-opacity="0.28" stroke-width="20"/>
+    <ellipse cx="512" cy="742" rx="255" ry="76" stroke="#FF6B2C" stroke-opacity="0.55" stroke-width="22"/>
+    <ellipse cx="512" cy="742" rx="160" ry="48" stroke="#FF6B2C" stroke-opacity="0.9" stroke-width="24"/>
+  </g>
+  <path d="M512 742 C 468 660 352 568 352 420 A160 160 0 1 1 672 420 C 672 568 556 660 512 742 Z" fill="#FF6B2C"/>
+  <circle cx="512" cy="420" r="84" fill="#0B0E13"/>
+  <g stroke="#FF6B2C" stroke-width="16" stroke-linecap="round">
+    <line x1="512" y1="350" x2="512" y2="382"/>
+    <line x1="512" y1="458" x2="512" y2="490"/>
+    <line x1="442" y1="420" x2="474" y2="420"/>
+    <line x1="550" y1="420" x2="582" y2="420"/>
+  </g>
+  <circle cx="512" cy="420" r="20" fill="#FF6B2C"/></g>
+</svg>
