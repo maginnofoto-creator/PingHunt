@@ -60,9 +60,8 @@ service cloud.firestore {
       match /live/{playerId} {
         allow write: if signedIn() && playerId == request.auth.uid;
         allow delete: if isLeader(code);
-        allow read: if isLeader(code) || (
-          signedIn() && resource.data.teamId != null && resource.data.teamId == myTeam(code)
-        );
+        // Lesen für alle Spieler (Joker wie Radar/Kompass brauchen fremde Positionen; die App zeigt nur Erlaubtes).
+        allow read: if signedIn();
       }
 
       // Pings: für alle im Spiel sichtbar.
@@ -93,6 +92,13 @@ service cloud.firestore {
             )
           )
         );
+        allow delete: if isLeader(code);
+      }
+
+      // Eingesetzte Joker
+      match /effects/{effectId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.by == request.auth.uid;
         allow delete: if isLeader(code);
       }
 

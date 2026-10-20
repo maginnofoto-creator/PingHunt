@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../chat.dart';
+import '../jokers.dart';
 import '../models.dart';
 import '../notify.dart';
 import '../player_engine.dart';
@@ -14,6 +15,7 @@ import '../tracker.dart';
 import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 import 'chat_screen.dart';
+import 'joker_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key, required this.code, this.observer = false});
@@ -41,6 +43,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<Ping> _pings = [];
   List<LivePos> _live = [];
   List<GameEvent> _events = [];
+  List<Effect> _effects = [];
   String? _liveTeam;
   bool _gameLoaded = false;
 
@@ -84,10 +87,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() => _players = ps);
       final me = _me;
       _engine.update(_game, me);
-      if (me?.teamId != _liveTeam) _subscribeLive(me?.teamId);
+      _liveTeam = me?.teamId;
       _updateChat(me);
     }));
     _subs.add(_repo.pingsStream(widget.code).listen((ps) => setState(() => _pings = ps)));
+    _subs.add(_repo.effectsStream(widget.code).listen((e) {
+      setState(() => _effects = e);
+      _engine.setEffects(e);
+    }, onError: (_) {}));
+    // Alle Positionen (eigenes Team wird angezeigt; andere nur über Joker)
+    _liveSub = _repo.liveStream(widget.code).listen((l) => setState(() => _live = l), onError: (_) {});
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -140,15 +149,115 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() {});
   }
 
-  void _subscribeLive(String? teamId) {
-    _liveSub?.cancel();
-    _liveTeam = teamId;
-    _live = [];
-    if (teamId == null) return;
-    _liveSub = _repo.liveStream(widget.code, teamId: teamId).listen(
-          (l) => setState(() => _live = l),
-          onError: (_) {},
-        );
+  /// Teams, deren Ping-Verlauf gerade verwischt ist.
+  Set<String> _wipedTeams(DateTime now) => {
+        for (final e in _effects)
+          if (e.type == 'wipe' && e.isActive(now) && e.targetId != null) e.targetId!,
+      };
+
+  Future<void> _openJokers(Game g, Player me) => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: PH.surface,
+        builder: (_) => JokerSheet(
+          game: g,
+          me: me,
+          players: _players,
+          effects: _effects,
+          live: _live,
+          pings: _pings,
+          myPos: _engine.latLng,
+        ),
+      );
+
+  /// Laufende Joker, die mich betreffen oder von meinem Team stammen.
+  List<Widget> _effectBanners(Game g, Player? me, DateTime now) {
+    if (me == null) return const [];
+    final out = <Widget>[];
+    for (final e in _effects) {
+      if (!e.isActive(now)) continue;
+      final d = jokerDef(e.type);
+      if (d == null) continue;
+      final mine = e.byTeam != null && e.byTeam == me.teamId;
+      final hitsMe = e.targets(me.uid, me.teamId);
+      final myTeam = g.team(me.teamId);
+      if (!mine && !hitsMe) continue;
+      // Zielgerichtete Slot-Joker (Fake etc.) nur dem eigenen Team zeigen
+      if (!mine && ['fake', 'skip', 'timeshift', 'wipe', 'shield', 'freepass', 'pause', 'proximity', 'hunterview']
+          .contains(e.type)) {
+        continue;
+      }
+      if (e.type == 'freeze' && (myTeam?.isHunter ?? false) == false && me.isPaused(now)) continue;
+      final isThreat = !mine && hitsMe;
+      final left = (e.slot != null && now.isBefore(e.slot!)) ? 'beim nächsten Ping' : 'noch ${countdown(e.end.difference(now))}';
+      out.add(Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isThreat ? PH.danger : PH.surface2,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: isThreat ? PH.danger : PH.accent),
+          ),
+          child: Row(
+            children: [
+              Icon(d.icon, size: 18, color: isThreat ? PH.bg : PH.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  e.type == 'freeze' && isThreat ? '❄ FREEZE – nicht bewegen! $left' : '${d.name} · $left',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: isThreat ? PH.bg : PH.text),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ));
+    }
+    return out;
+  }
+
+  /// Kompass-Pfeil zum nächsten Gejagten (Jäger-Joker).
+  Widget? _compass(Game g, Player? me, DateTime now) {
+    if (me == null) return null;
+    final active = _effects.any((e) => e.type == 'compass' && e.by == _repo.uid && e.isActive(now));
+    final here = _engine.latLng;
+    if (!active || here == null) return null;
+    LivePos? best;
+    double? bestD;
+    for (final l in _live) {
+      final t = g.team(l.teamId);
+      if (t == null || t.isHunter) continue;
+      Player? p;
+      for (final x in _players) {
+        if (x.uid == l.uid) p = x;
+      }
+      if (p == null || p.isCaught || p.isPaused(now) || p.observer) continue;
+      final d = metersBetween(here, l.pos);
+      if (bestD == null || d < bestD) {
+        bestD = d;
+        best = l;
+      }
+    }
+    if (best == null) return null;
+    final angle = bearingTo(here, best.pos) * 3.14159265 / 180;
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            color: PH.surface.withOpacity(0.85),
+            shape: BoxShape.circle,
+            border: Border.all(color: PH.accent, width: 3),
+          ),
+          child: Transform.rotate(
+            angle: angle,
+            child: const Icon(Icons.navigation, size: 72, color: PH.accent),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -170,7 +279,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (g == null) return;
     final hunted = _players.where((p) {
       final t = g.team(p.teamId);
-      return t != null && !t.isHunter && !p.isCaught && !p.observer;
+      final now = DateTime.now();
+      final shielded = activeFor(_effects, 'shield', p.uid, p.teamId, now).isNotEmpty;
+      return t != null && !t.isHunter && !p.isCaught && !p.observer && !shielded && !p.isPaused(now);
     }).toList();
     final chosen = await showModalBottomSheet<Player>(
       context: context,
@@ -219,11 +330,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (myTeam != null && myTeam.isHunter) {
       final (_, pingMarkers) = pingHistory(
-          game: g, pings: _pings, count: _history, teamFilter: _teamFilter, now: now);
+          game: g, pings: _pings, count: _history, teamFilter: _teamFilter, now: now,
+          latestOnlyTeams: _wipedTeams(now));
       markers.addAll(pingMarkers);
       for (final p in _players) {
         final t = g.team(p.teamId);
-        if (t == null || t.isHunter || p.exposed == null || !p.isLive(now)) continue;
+        if (t == null || t.isHunter || p.exposed == null || !p.isLive(now) || p.isPaused(now)) continue;
         markers.add(labelMarker(
           point: p.exposed!,
           color: Color(t.color),
@@ -234,9 +346,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
+    // Jäger-Blick: Gejagte sehen kurz alle Jäger
+    final hunterView = myTeam != null &&
+        !myTeam.isHunter &&
+        activeFor(_effects, 'hunterview', _repo.uid, me?.teamId, now).isNotEmpty;
     for (final l in _live) {
       if (l.uid == _repo.uid) continue;
-      final t = g.team(l.teamId);
+      final lt = g.team(l.teamId);
+      final ownTeam = l.teamId != null && l.teamId == me?.teamId;
+      final showHunter = hunterView && (lt?.isHunter ?? false);
+      if (!ownTeam && !showHunter) continue;
+      final t = lt;
       markers.add(labelMarker(
         point: l.pos,
         color: Color(t?.color ?? 0xFF9AA4B2),
@@ -290,7 +410,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final isHunter = myTeam?.isHunter ?? false;
 
     final polylines = isHunter
-        ? pingHistory(game: g, pings: _pings, count: _history, teamFilter: _teamFilter, now: now).$1
+        ? pingHistory(
+                game: g, pings: _pings, count: _history, teamFilter: _teamFilter, now: now,
+                latestOnlyTeams: _wipedTeams(now))
+            .$1
         : <Polyline>[];
 
     return PopScope(
@@ -330,10 +453,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(height: 8),
                     _statusCard(g, me, myTeam, now),
                     ..._liveBanners(g, myTeam, now),
+                    ..._effectBanners(g, me, now),
                   ],
                 )),
               ),
             ),
+            if (_compass(g, me, now) != null) Positioned.fill(child: _compass(g, me, now)!),
+            if (me != null && myTeam != null)
+              Positioned(
+                right: 12,
+                bottom: (isHunter ? 196 : 120) + 104,
+                child: FloatingActionButton.small(
+                  heroTag: 'joker',
+                  backgroundColor: PH.surface,
+                  foregroundColor: PH.accent,
+                  tooltip: 'Joker',
+                  onPressed: () => _openJokers(g, me),
+                  child: const Icon(Icons.style),
+                ),
+              ),
             Positioned(
               right: 12,
               bottom: (isHunter ? 196 : 120) + 52,

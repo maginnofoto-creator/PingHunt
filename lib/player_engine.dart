@@ -6,7 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'dart:math' as math;
+
 import 'geo.dart';
+import 'jokers.dart';
 import 'models.dart';
 import 'notify.dart';
 import 'repo.dart';
@@ -57,6 +60,47 @@ class PlayerEngine extends ChangeNotifier {
   int? _battery;
   bool _pinging = false;
   bool _offlineChecked = false;
+
+  // ---------- Joker ----------
+  List<Effect> effects = [];
+  List<LivePos> others = [];
+  final List<(DateTime, LatLng)> _hist = [];
+  final Map<String, LatLng> _anchors = {};
+  final Set<String> _done = {};
+  final _rnd = math.Random();
+  DateTime? _lastProximity;
+  DateTime? _lastTurbo;
+
+  void setEffects(List<Effect> list) {
+    effects = list;
+    notifyListeners();
+  }
+
+  void setOthers(List<LivePos> list) => others = list;
+
+  String? get _teamId => me?.teamId;
+
+  Effect? _active(String type) {
+    final l = activeFor(effects, type, _repo.uid, _teamId, DateTime.now());
+    return l.isEmpty ? null : l.last;
+  }
+
+  /// Pause-Joker aktiv (und Radius nicht verlassen)?
+  bool get isPaused {
+    final e = _active('pause');
+    return e != null && !_done.contains('pausebroken_${e.id}');
+  }
+
+  bool get _freepass => _active('freepass') != null;
+
+  LatLng? _histAt(DateTime t) {
+    LatLng? best;
+    for (final (time, pos) in _hist) {
+      if (time.isAfter(t)) break;
+      best = pos;
+    }
+    return best ?? (_hist.isEmpty ? null : _hist.first.$2);
+  }
 
   /// Kurzer Hinweis per Vibration (+ Benachrichtigung im Hintergrunddienst).
   void _buzz(String title, String body) {
@@ -192,7 +236,13 @@ class PlayerEngine extends ChangeNotifier {
       return;
     }
 
-    if (g != null && _activeHunted) {
+    _hist.add((now, here));
+    while (_hist.isNotEmpty && now.difference(_hist.first.$1).inMinutes > 45) {
+      _hist.removeAt(0);
+    }
+    if (g != null && _activeHunted) await _jokerPosition(g, here, now);
+
+    if (g != null && _activeHunted && !isPaused && !_freepass) {
       final violating = inside == false || inBlocked != null;
       if (violating) {
         _outsideSince ??= now;
@@ -252,7 +302,7 @@ class PlayerEngine extends ChangeNotifier {
     }
 
     // Live-Sichtbarkeit nach Verlassen der Zone
-    if (_activeHunted && liveUntil != null && now.isBefore(liveUntil!)) {
+    if (_activeHunted && !isPaused && liveUntil != null && now.isBefore(liveUntil!)) {
       if (_lastExposedWrite == null || now.difference(_lastExposedWrite!).inSeconds >= 10) {
         _lastExposedWrite = now;
         await _safe(() => _repo.updateMe(code, {
@@ -285,6 +335,7 @@ class PlayerEngine extends ChangeNotifier {
     if (g != null &&
         g.isRunning &&
         showToSpectators &&
+        !isPaused &&
         !(me?.observer ?? false) &&
         !(me?.isCaught ?? false) &&
         (_lastTrail == null ||
@@ -328,26 +379,67 @@ class PlayerEngine extends ChangeNotifier {
       return;
     }
 
+    await _jokerTick(g, now);
+
     final slot = g.currentSlot(now);
     if (slot != null && (_lastSlotSent == null || slot.isAfter(_lastSlotSent!))) {
       _lastSlotSent = slot;
-      await _sendPing('${_repo.uid}_${slot.millisecondsSinceEpoch}', slot, false);
+      final id = '${_repo.uid}_${slot.millisecondsSinceEpoch}';
+      Effect? forSlot(String type) {
+        for (final e in effects) {
+          if (e.type == type && e.slot != null && e.slot!.isAtSameMomentAs(slot) && e.targets(_repo.uid, _teamId)) {
+            return e;
+          }
+        }
+        return null;
+      }
+
+      if (isPaused || forSlot('skip') != null) {
+        // Platzhalter, damit die Spielleitung keinen Ersatz-Ping schickt
+        await _safe(() => _repo.writePing(code, id, {
+              'uid': _repo.uid,
+              'name': me?.name ?? '',
+              'teamId': _teamId,
+              't': Timestamp.fromDate(slot),
+              'skipped': true,
+            }));
+      } else {
+        final fake = forSlot('fake');
+        final shift = forSlot('timeshift');
+        await _sendPing(id, slot, false,
+            fakeMeters: fake?.p1, shiftMinutes: shift?.p1);
+      }
     }
 
     final req = g.pingRequestAt;
     if (req != null &&
         (_lastManualHandled == null || req.isAfter(_lastManualHandled!))) {
       _lastManualHandled = req;
-      if (now.difference(req).inMinutes < 2) {
+      if (now.difference(req).inMinutes < 2 && !isPaused) {
         await _sendPing('${_repo.uid}_m${req.millisecondsSinceEpoch}', now, true);
       }
     }
     notifyListeners();
   }
 
-  Future<void> _sendPing(String id, DateTime t, bool manual) async {
+  Future<void> _sendPing(String id, DateTime t, bool manual, {int? fakeMeters, int? shiftMinutes}) async {
     _pinging = true;
     try {
+      if (shiftMinutes != null) {
+        final old = _histAt(DateTime.now().subtract(Duration(minutes: shiftMinutes)));
+        if (old != null) {
+          await _safe(() => _repo.writePing(code, id, {
+                'uid': _repo.uid,
+                'name': me?.name ?? '',
+                'teamId': me?.teamId,
+                'lat': old.latitude,
+                'lng': old.longitude,
+                't': Timestamp.fromDate(t),
+                'manual': manual,
+              }));
+          return;
+        }
+      }
       Position? p = position;
       if (p == null || DateTime.now().difference(p.timestamp).inSeconds > 30) {
         try {
@@ -362,20 +454,120 @@ class PlayerEngine extends ChangeNotifier {
         }
       }
       if (p == null) return;
-      final fix = p;
+      var fix = LatLng(p.latitude, p.longitude);
+      if (fakeMeters != null) fix = offsetRandom(fix, fakeMeters.toDouble(), _rnd);
+      final pos = fix;
       await _safe(() => _repo.writePing(code, id, {
             'uid': _repo.uid,
             'name': me?.name ?? '',
             'teamId': me?.teamId,
-            'lat': fix.latitude,
-            'lng': fix.longitude,
+            'lat': pos.latitude,
+            'lng': pos.longitude,
             't': Timestamp.fromDate(t),
             'manual': manual,
+            if (fakeMeters != null) 'fake': true,
           }));
     } finally {
       _pinging = false;
     }
   }
+
+  /// Joker, die von der eigenen Position abhängen (Pause-Radius, Freeze, Annäherungsalarm).
+  Future<void> _jokerPosition(Game g, LatLng here, DateTime now) async {
+    // Pause
+    final pause = _active('pause');
+    if (pause != null && !_done.contains('pausebroken_${pause.id}')) {
+      final anchor = _anchors.putIfAbsent('pause_${pause.id}', () => here);
+      final radius = math.max(pause.p2, 25); // 25 m GPS-Toleranz
+      if (_done.add('pausestart_${pause.id}')) {
+        await _safe(() => _repo.updateMe(code, {'pausedUntil': Timestamp.fromDate(pause.end)}));
+        _buzz('⏸ Pause bis ${_hhmm(pause.end)}', 'Bleib im Umkreis von ${pause.p2} m, sonst endet deine Pause.');
+      } else if (metersBetween(anchor, here) > radius) {
+        _done.add('pausebroken_${pause.id}');
+        await _safe(() => _repo.updateMe(code, {'pausedUntil': null}));
+        await _safe(() => _repo.addEvent(
+            code, '${me?.name ?? 'Spieler'} hat den Pausen-Radius verlassen – Pause beendet', myTeam?.color ?? 0xFF9AA4B2));
+        _buzz('Pause beendet', 'Du hast den Radius von ${pause.p2} m verlassen.');
+      }
+    }
+    // Freeze
+    final freeze = _active('freeze');
+    if (freeze != null && !isPaused && !_done.contains('freezebroken_${freeze.id}')) {
+      final anchor = _anchors.putIfAbsent('freeze_${freeze.id}', () => here);
+      if (_done.add('freezestart_${freeze.id}')) {
+        _buzz('❄ FREEZE!', 'Nicht bewegen bis ${_hhmm(freeze.end)} – sonst bist du live sichtbar.');
+      } else if (metersBetween(anchor, here) > 30) {
+        _done.add('freezebroken_${freeze.id}');
+        final until = now.add(Duration(minutes: g.liveMin));
+        liveUntil = until;
+        await _safe(() => _repo.updateMe(code, {
+              'liveUntil': Timestamp.fromDate(until),
+              'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
+            }));
+        await _safe(() => _repo.addEvent(code,
+            '${me?.name ?? 'Spieler'} hat sich beim Freeze bewegt – ${g.liveMin} min live sichtbar', myTeam?.color ?? 0xFFFF4D4D));
+        _buzz('Bewegt beim Freeze!', 'Du bist jetzt ${g.liveMin} Minuten live sichtbar.');
+      }
+    }
+
+    // Annäherungsalarm
+    final prox = _active('proximity');
+    if (prox != null && (_lastProximity == null || now.difference(_lastProximity!).inMinutes >= 2)) {
+      double? nearest;
+      for (final o in others) {
+        final t = g.team(o.teamId);
+        if (t == null || !t.isHunter) continue;
+        if (o.t != null && now.difference(o.t!).inMinutes > 5) continue;
+        final d = metersBetween(here, o.pos);
+        if (nearest == null || d < nearest) nearest = d;
+      }
+      if (nearest != null && nearest < prox.p2) {
+        _lastProximity = now;
+        _buzz('⚠ Jäger in der Nähe!', 'Ein Jäger ist ca. ${nearest.round()} m entfernt.');
+      }
+    }
+  }
+
+  /// Joker, die zeitgesteuert wirken (Live-Ortung, Speedhunt, Turbo).
+  Future<void> _jokerTick(Game g, DateTime now) async {
+    final paused = isPaused;
+    // Live-Ortung durch Jäger
+    final live = _active('live');
+    if (live != null && !paused && _done.add('live_${live.id}')) {
+      if (liveUntil == null || liveUntil!.isBefore(live.end)) {
+        liveUntil = live.end;
+        final here = latLng;
+        await _safe(() => _repo.updateMe(code, {
+              'liveUntil': Timestamp.fromDate(live.end),
+              if (here != null)
+                'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
+            }));
+      }
+      _buzz('🔴 Du bist LIVE!', 'Die Jäger orten dich bis ${_hhmm(live.end)} (Joker „Live-Ortung“).');
+    }
+    // Speedhunt
+    for (final e in effects) {
+      if (e.type != 'speedhunt' || !e.isActive(now) || !e.targets(_repo.uid, _teamId)) continue;
+      if (!_done.add('speed_${e.id}')) continue;
+      if (paused) continue;
+      _buzz('⚡ Speedhunt!', 'Die Jäger haben dich gerade geortet.');
+      await _sendPing('${_repo.uid}_s${e.id}', now, true);
+    }
+    // Turbo-Intervall: zusätzliche Pings alle 10 Minuten
+    final turbo = _active('turbo');
+    if (turbo != null && !paused) {
+      final k = now.difference(turbo.start).inMinutes ~/ 10;
+      if (k >= 1) {
+        final slotT = turbo.start.add(Duration(minutes: 10 * k));
+        if (_lastTurbo == null || slotT.isAfter(_lastTurbo!)) {
+          _lastTurbo = slotT;
+          await _sendPing('${_repo.uid}_t${slotT.millisecondsSinceEpoch}', slotT, false);
+        }
+      }
+    }
+  }
+
+  String _hhmm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   Future<void> _safe(Future<void> Function() f) async {
     try {

@@ -15,6 +15,7 @@ import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 import 'area_editor.dart';
 import 'chat_screen.dart';
+import 'joker_screen.dart';
 
 /// Spielleitung – auf dem Handy als Tabs, im Browser als großes Dashboard.
 class LeaderScreen extends StatefulWidget {
@@ -153,7 +154,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
     _lastSlotChecked = slot;
     for (final p in active) {
       final t = g.team(p.teamId)!;
-      if (t.isHunter || p.isCaught) continue;
+      if (t.isHunter || p.isCaught || p.isPaused(now)) continue;
       final has = _pings.any((x) => x.uid == p.uid && x.t.isAtSameMomentAs(slot));
       if (has) continue;
       final last = liveBy[p.uid];
@@ -433,6 +434,15 @@ class _LeaderScreenState extends State<LeaderScreen> {
             ),
             icon: const Icon(Icons.draw),
             label: Text(g.area.length >= 3 ? 'Spielfeld bearbeiten' : 'Spielfeld zeichnen'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => JokerConfigScreen(code: g.code)),
+            ),
+            icon: const Icon(Icons.style),
+            label: Text('Joker einstellen (${g.jokers.values.where((v) => v is Map && v['enabled'] == true).length} aktiv)'),
           ),
           const SizedBox(height: 14),
           _zonesSection(g),
@@ -954,6 +964,11 @@ class _LeaderScreenState extends State<LeaderScreen> {
                 message: 'Zentrale im Browser – sendet keinen Standort',
                 child: Icon(Icons.desktop_windows_outlined, size: 15, color: PH.muted),
               ),
+            ),
+          if (p.isPaused(now))
+            const Padding(
+              padding: EdgeInsets.only(right: 6),
+              child: Text('⏸ PAUSE', style: TextStyle(color: PH.accent, fontWeight: FontWeight.w800, fontSize: 11)),
             ),
           if (p.isLive(now))
             const Padding(

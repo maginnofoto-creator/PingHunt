@@ -154,6 +154,8 @@ class Game {
   final int spectatorDelayMin;
   final int offlinePenaltyMin;
   final SpecSettings spec;
+  final Map<String, dynamic> jokers; // Joker-Einstellungen (siehe jokers.dart)
+  final bool jokerReveal; // Gegner erfahren, welcher Joker eingesetzt wurde
   final DateTime? startedAt;
   final DateTime? endsAt;
   final DateTime? pingAnchor;
@@ -175,6 +177,8 @@ class Game {
     required this.spectatorDelayMin,
     this.offlinePenaltyMin = 5,
     this.spec = const SpecSettings(),
+    this.jokers = const {},
+    this.jokerReveal = false,
     this.startedAt,
     this.endsAt,
     this.pingAnchor,
@@ -243,6 +247,8 @@ class Game {
       spectatorDelayMin: _int(m['spectatorDelayMin'], 20),
       offlinePenaltyMin: _int(m['offlinePenaltyMin'], 5),
       spec: SpecSettings.fromMap(m['spec']),
+      jokers: m['jokers'] is Map ? Map<String, dynamic>.from(m['jokers'] as Map) : const {},
+      jokerReveal: m['jokerReveal'] == true,
       startedAt: _ts(m['startedAt']),
       endsAt: _ts(m['endsAt']),
       pingAnchor: _ts(m['pingAnchor']),
@@ -266,6 +272,7 @@ class Player {
   final LatLng? exposed;
   final DateTime? exposedAt;
   final bool observer; // Zentrale im Browser: sieht mit, sendet keinen Standort
+  final DateTime? pausedUntil; // Pause-Joker aktiv
 
   Player({
     required this.uid,
@@ -278,7 +285,10 @@ class Player {
     this.exposed,
     this.exposedAt,
     this.observer = false,
+    this.pausedUntil,
   });
+
+  bool isPaused(DateTime now) => pausedUntil != null && now.isBefore(pausedUntil!);
 
   bool get isCaught => status == 'caught';
   bool isLive(DateTime now) => liveUntil != null && now.isBefore(liveUntil!);
@@ -303,6 +313,7 @@ class Player {
       exposed: exposed,
       exposedAt: exposedAt,
       observer: m['observer'] == true,
+      pausedUntil: _ts(m['pausedUntil']),
     );
   }
 }
@@ -316,8 +327,10 @@ class Ping {
   final DateTime t;
   final bool manual;
   final bool offline; // Ersatz-Ping mit letzter bekannter Position
+  final bool fake; // Fake-Ping-Joker
 
-  Ping(this.id, this.uid, this.name, this.teamId, this.pos, this.t, this.manual, {this.offline = false});
+  Ping(this.id, this.uid, this.name, this.teamId, this.pos, this.t, this.manual,
+      {this.offline = false, this.fake = false});
 
   static Ping? fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data();
@@ -328,7 +341,7 @@ class Ping {
     if (lat == null || lng == null || t == null) return null;
     return Ping(doc.id, (m['uid'] as String?) ?? '', (m['name'] as String?) ?? '',
         m['teamId'] as String?, LatLng(lat, lng), t, m['manual'] == true,
-        offline: m['offline'] == true);
+        offline: m['offline'] == true, fake: m['fake'] == true);
   }
 }
 

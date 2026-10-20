@@ -290,6 +290,7 @@ Marker labelMarker({
   DateTime? cutoff,
   required DateTime now,
   double fade = 1,
+  Set<String> latestOnlyTeams = const {},
 }) {
   final byPlayer = <String, List<Ping>>{};
   for (final p in pings) {
@@ -303,7 +304,8 @@ Marker labelMarker({
   final markers = <Marker>[];
   for (final list in byPlayer.values) {
     list.sort((a, b) => a.t.compareTo(b.t));
-    final shown = count == 0 || list.length <= count ? list : list.sublist(list.length - count);
+    final n = latestOnlyTeams.contains(list.last.teamId) ? 1 : count;
+    final shown = n == 0 || list.length <= n ? list : list.sublist(list.length - n);
     final team = game.team(shown.last.teamId)!;
     final c = Color(team.color);
     if (shown.length > 1) {

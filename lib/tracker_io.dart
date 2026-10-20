@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chat.dart';
 import 'config.dart';
+import 'jokers.dart';
 import 'models.dart';
 import 'notify.dart';
 import 'player_engine.dart';
@@ -223,6 +224,31 @@ Future<void> trackerMain(ServiceInstance service) async {
             important: true);
       });
     }, onError: (_) {}));
+
+    // Joker-Effekte und Positionen der anderen (für Annäherungsalarm)
+    final seenEffects = <String>{};
+    subs.add(repo.effectsStream(code).listen((list) {
+      eng.setEffects(list);
+      final g = game, m = me;
+      for (final e in list) {
+        if (!seenEffects.add(e.id)) continue;
+        if (g == null || m == null || e.by == repo.uid) continue;
+        if (e.start.isBefore(startedAt.subtract(const Duration(minutes: 1)))) continue;
+        final def = jokerDef(e.type);
+        if (def == null) continue;
+        final myTeam = g.team(m.teamId);
+        if (myTeam == null) continue;
+        final opponent = def.forHunters != myTeam.isHunter;
+        if (!opponent) continue;
+        // Gezielte Joker meldet die Engine selbst (Live, Speedhunt, Freeze)
+        if (['live', 'speedhunt', 'freeze'].contains(e.type) && e.targets(repo.uid, m.teamId)) continue;
+        final who = def.forHunters ? 'Die Jäger' : (g.team(e.byTeam)?.name ?? 'Ein Team');
+        Notify.message('🃏 Joker eingesetzt',
+            g.jokerReveal ? '$who: „${def.name}“' : '$who hat einen Joker eingesetzt.',
+            important: true);
+      }
+    }, onError: (_) {}));
+    subs.add(repo.liveStream(code).listen(eng.setOthers, onError: (_) {}));
 
     await eng.start();
 

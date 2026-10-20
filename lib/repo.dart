@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'jokers.dart';
 import 'models.dart';
 import 'theme.dart';
 
@@ -261,7 +262,7 @@ class Repo {
 
   /// Spiel mit allen Daten löschen (nur Spielleitung).
   Future<void> deleteGame(String code) async {
-    for (final sub in ['pings', 'trail', 'live', 'messages', 'events', 'players', 'secret']) {
+    for (final sub in ['pings', 'trail', 'live', 'messages', 'events', 'effects', 'players', 'secret']) {
       while (true) {
         final q = await gameRef(code).collection(sub).limit(300).get();
         if (q.docs.isEmpty) break;
@@ -281,6 +282,17 @@ class Repo {
       await gameRef(code).collection('leaders').doc(uid).delete();
     } catch (_) {}
   }
+
+  // ---------- Joker ----------
+
+  Stream<List<Effect>> effectsStream(String code) => gameRef(code)
+      .collection('effects')
+      .snapshots()
+      .map((q) => q.docs.map(Effect.fromDoc).whereType<Effect>().toList()
+        ..sort((a, b) => a.start.compareTo(b.start)));
+
+  Future<void> createEffect(String code, Map<String, dynamic> data) =>
+      gameRef(code).collection('effects').add({...data, 'by': uid});
 
   Future<Player?> getMyPlayer(String code) async {
     final s = await _players(code).doc(uid).get();
