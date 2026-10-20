@@ -467,37 +467,117 @@ class _LeaderScreenState extends State<LeaderScreen> {
             onMinus: g.durationH <= 1 ? null : () => _changeDuration(g, -1),
             onPlus: g.durationH >= 72 ? null : () => _changeDuration(g, 1),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Zuschauer-Verzögerung', style: TextStyle(fontWeight: FontWeight.w600)),
-                      Text('was Zuschauer sehen', style: TextStyle(fontSize: 12, color: PH.muted)),
-                    ],
-                  ),
-                ),
-                DropdownButton<int>(
-                  value: const [0, 10, 20, 30, 60].contains(g.spectatorDelayMin) ? g.spectatorDelayMin : 20,
-                  dropdownColor: PH.surface2,
-                  items: const [
-                    DropdownMenuItem(value: 0, child: Text('Keine')),
-                    DropdownMenuItem(value: 10, child: Text('10 min')),
-                    DropdownMenuItem(value: 20, child: Text('20 min')),
-                    DropdownMenuItem(value: 30, child: Text('30 min')),
-                    DropdownMenuItem(value: 60, child: Text('60 min')),
-                  ],
-                  onChanged: (v) =>
-                      v == null ? null : _do(() => _repo.updateGame(g.code, {'spectatorDelayMin': v})),
-                ),
-              ],
-            ),
+          const SizedBox(height: 8),
+          const Divider(color: PH.line),
+          _spectatorSection(g),
+        ],
+      ),
+    );
+  }
+
+  // ---------------- Zuschauer ----------------
+
+  Future<void> _setSpec(Game g, SpecSettings spec) =>
+      _do(() => _repo.updateGame(g.code, {'spec': spec.toMap()}));
+
+  Widget _modeRow(String title, String value, ValueChanged<String> onChanged,
+      {List<(String, String)> options = const [('live', 'Live'), ('delay', 'Verzögert'), ('off', 'Aus')]}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          SegmentedButton<String>(
+            showSelectedIcon: false,
+            segments: [for (final o in options) ButtonSegment(value: o.$1, label: Text(o.$2))],
+            selected: {value},
+            onSelectionChanged: (v) => onChanged(v.first),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _spectatorSection(Game g) {
+    final sp = g.spec;
+    final hunted = g.teamList.where((t) => !t.isHunter).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('ZUSCHAUER', style: label()),
+        const SizedBox(height: 4),
+        const Text('Was Zuschauer sehen – die Spieler bekommen davon nichts mit, '
+            'außer bei sichtbaren Team-Chats.', style: TextStyle(fontSize: 12, color: PH.muted)),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              const Expanded(child: Text('Verzögerung', style: TextStyle(fontWeight: FontWeight.w600))),
+              DropdownButton<int>(
+                value: const [0, 5, 10, 20, 30, 60].contains(g.spectatorDelayMin) ? g.spectatorDelayMin : 20,
+                dropdownColor: PH.surface2,
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('Keine')),
+                  DropdownMenuItem(value: 5, child: Text('5 min')),
+                  DropdownMenuItem(value: 10, child: Text('10 min')),
+                  DropdownMenuItem(value: 20, child: Text('20 min')),
+                  DropdownMenuItem(value: 30, child: Text('30 min')),
+                  DropdownMenuItem(value: 60, child: Text('60 min')),
+                ],
+                onChanged: (v) =>
+                    v == null ? null : _do(() => _repo.updateGame(g.code, {'spectatorDelayMin': v})),
+              ),
+            ],
+          ),
+        ),
+        _modeRow('Jäger auf der Karte', sp.hunters, (v) => _setSpec(g, sp.copyWith(hunters: v))),
+        _modeRow('Gejagte live verfolgen', sp.hunted, (v) => _setSpec(g, sp.copyWith(hunted: v))),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Letzte Pings verblasst zeigen'),
+          subtitle: const Text('Wo die Jäger gerade hinlaufen', style: TextStyle(fontSize: 12)),
+          value: sp.lastPings,
+          onChanged: (v) => _setSpec(g, sp.copyWith(lastPings: v)),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Durchsagen zeigen'),
+          value: sp.announcements,
+          onChanged: (v) => _setSpec(g, sp.copyWith(announcements: v)),
+        ),
+        _modeRow('Team-Chats', sp.teamChats, (v) => _setSpec(g, sp.copyWith(teamChats: v))),
+        if (sp.teamChats != 'off')
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final t in g.teamList)
+                FilterChip(
+                  avatar: Dot(Color(t.color)),
+                  label: Text(t.name),
+                  selected: sp.chatTeams.contains(t.id),
+                  onSelected: (on) => _setSpec(
+                    g,
+                    sp.copyWith(chatTeams: [
+                      for (final id in sp.chatTeams)
+                        if (id != t.id) id,
+                      if (on) t.id,
+                    ]),
+                  ),
+                ),
+            ],
+          ),
+        if (sp.teamChats != 'off')
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('Ausgewählte Teams sehen in ihrem Chat den Hinweis „Zuschauer lesen mit“. '
+                'Private Chats mit der Spielleitung sind nie sichtbar.',
+                style: TextStyle(fontSize: 12, color: PH.muted)),
+          ),
+        if (hunted.isEmpty) const SizedBox.shrink(),
+      ],
     );
   }
 

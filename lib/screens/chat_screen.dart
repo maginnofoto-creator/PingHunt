@@ -23,6 +23,7 @@ class ChatThread extends StatefulWidget {
     this.myPos,
     this.onLocation,
     this.emptyText = 'Noch keine Nachrichten.',
+    this.banner,
   });
 
   final ChatWatcher watcher;
@@ -34,6 +35,9 @@ class ChatThread extends StatefulWidget {
   final LatLng? Function()? myPos;
   final void Function(LatLng)? onLocation;
   final String emptyText;
+
+  /// Hinweis oben im Chat, z. B. „Zuschauer lesen mit“.
+  final String? banner;
 
   @override
   State<ChatThread> createState() => _ChatThreadState();
@@ -104,6 +108,13 @@ class _ChatThreadState extends State<ChatThread> {
     final me = Repo.i.uid;
     return Column(
       children: [
+        if (widget.banner != null)
+          Container(
+            width: double.infinity,
+            color: PH.accent.withOpacity(0.15),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text(widget.banner!, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
         if (widget.watcher.error != null)
           Container(
             width: double.infinity,
@@ -260,11 +271,15 @@ class PlayerChatScreen extends StatelessWidget {
     required this.myName,
     required this.team,
     this.myPos,
+    this.spectatorNote,
   });
 
   final ChatWatcher watcher;
   final String myName;
   final Team? team;
+
+  /// Hinweis, wenn Zuschauer den Team-Chat mitlesen.
+  final String? spectatorNote;
   final LatLng? Function()? myPos;
 
   @override
@@ -283,7 +298,10 @@ class PlayerChatScreen extends StatelessWidget {
             quick: true,
             myPos: myPos,
             onLocation: (p) => Navigator.pop(context, p),
-            emptyText: 'Team-Chat – nur dein Team und die Spielleitung lesen mit.',
+            emptyText: spectatorNote == null
+                ? 'Team-Chat – nur dein Team und die Spielleitung lesen mit.'
+                : 'Team-Chat – dein Team, die Spielleitung und Zuschauer lesen mit.',
+            banner: spectatorNote,
           ),
         ),
       (

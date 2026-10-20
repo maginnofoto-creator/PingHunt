@@ -289,6 +289,7 @@ Marker labelMarker({
   Set<String>? teamFilter,
   DateTime? cutoff,
   required DateTime now,
+  double fade = 1,
 }) {
   final byPlayer = <String, List<Ping>>{};
   for (final p in pings) {
@@ -308,7 +309,7 @@ Marker labelMarker({
     if (shown.length > 1) {
       lines.add(Polyline(
         points: [for (final p in shown) p.pos],
-        color: c.withOpacity(0.55),
+        color: c.withOpacity(0.55 * fade),
         strokeWidth: 2.5,
       ));
     }
@@ -321,9 +322,11 @@ Marker labelMarker({
         color: c,
         size: latest ? 18 : 10,
         label: latest
-            ? '${p.name}${p.offline ? ' · offline' : ''} · ${ago(p.t, now)}'
+            ? (fade < 1
+                ? 'Ping ${p.name} · ${hhmm(p.t)}'
+                : '${p.name}${p.offline ? ' · offline' : ''} · ${ago(p.t, now)}')
             : '${hhmm(p.t)}${p.offline ? ' ⚠' : ''}',
-        opacity: latest ? 1 : (1 - age * 0.12).clamp(0.35, 0.9).toDouble(),
+        opacity: (latest ? 1.0 : (1 - age * 0.12).clamp(0.35, 0.9).toDouble()) * fade,
       ));
     }
   }

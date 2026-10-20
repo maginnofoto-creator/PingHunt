@@ -77,6 +77,68 @@ class Zone {
   }
 }
 
+/// Was Zuschauer sehen dürfen (legt die Spielleitung fest).
+class SpecSettings {
+  final String hunters; // live, delay, off
+  final String hunted; // live, delay, off
+  final bool lastPings; // letzte Pings verblasst anzeigen
+  final bool announcements; // Durchsagen
+  final String teamChats; // off, live, delay
+  final List<String> chatTeams; // Teams, deren Chat sichtbar ist
+
+  const SpecSettings({
+    this.hunters = 'live',
+    this.hunted = 'delay',
+    this.lastPings = true,
+    this.announcements = true,
+    this.teamChats = 'off',
+    this.chatTeams = const [],
+  });
+
+  bool chatVisible(String teamId) => teamChats != 'off' && chatTeams.contains(teamId);
+
+  Map<String, dynamic> toMap() => {
+        'hunters': hunters,
+        'hunted': hunted,
+        'lastPings': lastPings,
+        'announcements': announcements,
+        'teamChats': teamChats,
+        'chatTeams': chatTeams,
+      };
+
+  SpecSettings copyWith({
+    String? hunters,
+    String? hunted,
+    bool? lastPings,
+    bool? announcements,
+    String? teamChats,
+    List<String>? chatTeams,
+  }) =>
+      SpecSettings(
+        hunters: hunters ?? this.hunters,
+        hunted: hunted ?? this.hunted,
+        lastPings: lastPings ?? this.lastPings,
+        announcements: announcements ?? this.announcements,
+        teamChats: teamChats ?? this.teamChats,
+        chatTeams: chatTeams ?? this.chatTeams,
+      );
+
+  static String _mode(dynamic v, String fallback, List<String> allowed) =>
+      v is String && allowed.contains(v) ? v : fallback;
+
+  static SpecSettings fromMap(dynamic raw) {
+    if (raw is! Map) return const SpecSettings();
+    return SpecSettings(
+      hunters: _mode(raw['hunters'], 'live', ['live', 'delay', 'off']),
+      hunted: _mode(raw['hunted'], 'delay', ['live', 'delay', 'off']),
+      lastPings: raw['lastPings'] != false,
+      announcements: raw['announcements'] != false,
+      teamChats: _mode(raw['teamChats'], 'off', ['live', 'delay', 'off']),
+      chatTeams: [for (final t in (raw['chatTeams'] as List?) ?? const []) '$t'],
+    );
+  }
+}
+
 class Game {
   final String code;
   final String leaderUid;
@@ -91,6 +153,7 @@ class Game {
   final int durationH;
   final int spectatorDelayMin;
   final int offlinePenaltyMin;
+  final SpecSettings spec;
   final DateTime? startedAt;
   final DateTime? endsAt;
   final DateTime? pingAnchor;
@@ -111,6 +174,7 @@ class Game {
     required this.durationH,
     required this.spectatorDelayMin,
     this.offlinePenaltyMin = 5,
+    this.spec = const SpecSettings(),
     this.startedAt,
     this.endsAt,
     this.pingAnchor,
@@ -178,6 +242,7 @@ class Game {
       durationH: _int(m['durationH'], 24),
       spectatorDelayMin: _int(m['spectatorDelayMin'], 20),
       offlinePenaltyMin: _int(m['offlinePenaltyMin'], 5),
+      spec: SpecSettings.fromMap(m['spec']),
       startedAt: _ts(m['startedAt']),
       endsAt: _ts(m['endsAt']),
       pingAnchor: _ts(m['pingAnchor']),

@@ -114,6 +114,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           myName: me?.name ?? 'Spieler',
           team: g.team(me?.teamId),
           myPos: widget.observer ? null : () => _engine.latLng,
+          spectatorNote: me?.teamId != null && g.spec.chatVisible(me!.teamId!)
+              ? (g.spec.teamChats == 'delay'
+                  ? '👀 Zuschauer lesen diesen Chat mit (${g.spectatorDelayMin} min verzögert)'
+                  : '👀 Zuschauer lesen diesen Chat live mit')
+              : null,
         ),
       ),
     );

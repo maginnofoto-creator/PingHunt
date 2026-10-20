@@ -279,11 +279,14 @@ class PlayerEngine extends ChangeNotifier {
             't': Timestamp.fromDate(now),
           }));
     }
-    // Jäger-Position für Zuschauer (ohne Verzögerung)
+    // Spur für Zuschauer (nur wenn die Spielleitung sie für diese Rolle freigibt)
+    final showToSpectators =
+        g != null && (isHunter ? g.spec.hunters != 'off' : (isHunted && g.spec.hunted != 'off'));
     if (g != null &&
         g.isRunning &&
-        isHunter &&
+        showToSpectators &&
         !(me?.observer ?? false) &&
+        !(me?.isCaught ?? false) &&
         (_lastTrail == null ||
             now.difference(_lastTrail!).inSeconds >= 60 ||
             (moved > 40 && now.difference(_lastTrail!).inSeconds >= 20))) {
