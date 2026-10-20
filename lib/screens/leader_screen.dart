@@ -108,6 +108,86 @@ class _LeaderScreenState extends State<LeaderScreen> {
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+    _watchdog = Timer.periodic(const Duration(seconds: 30), (_) => _checkOffline());
+  }
+
+  Timer? _watchdog;
+  final Set<String> _offlineReported = {};
+  DateTime? _lastSlotChecked;
+
+  /// Offline-Spieler melden und für verpasste Pings die letzte bekannte Position senden.
+  Future<void> _checkOffline() async {
+    final g = _game;
+    if (g == null || !g.isRunning) return;
+    final now = DateTime.now();
+    final liveBy = {for (final l in _live) l.uid: l};
+
+    DateTime? lastSign(Player p) {
+      final a = p.lastSeen, b = liveBy[p.uid]?.t;
+      if (a == null) return b;
+      if (b == null) return a;
+      return a.isAfter(b) ? a : b;
+    }
+
+    final active = _players.where((p) => !p.observer && g.team(p.teamId) != null).toList();
+
+    for (final p in active) {
+      final seen = lastSign(p);
+      final offline = seen == null || now.difference(seen).inMinutes >= 5;
+      if (offline && !_offlineReported.contains(p.uid)) {
+        _offlineReported.add(p.uid);
+        final mins = seen == null ? null : now.difference(seen).inMinutes;
+        final text = '${p.name} (${g.team(p.teamId)?.name ?? ''}) ist offline'
+            '${mins == null ? '' : ' – seit $mins min kein Signal'}';
+        await _repo.addEventOnce(
+            g.code, 'off_${p.uid}_${seen?.millisecondsSinceEpoch ?? 0}', text, 0xFF9AA4B2);
+        Notify.message('Spieler offline', text, important: true);
+      } else if (!offline) {
+        _offlineReported.remove(p.uid);
+      }
+    }
+
+    // Verpasster Ping → letzte bekannte Position
+    final slot = g.currentSlot(now);
+    if (slot == null || now.difference(slot).inMinutes < 2 || slot == _lastSlotChecked) return;
+    _lastSlotChecked = slot;
+    for (final p in active) {
+      final t = g.team(p.teamId)!;
+      if (t.isHunter || p.isCaught) continue;
+      final has = _pings.any((x) => x.uid == p.uid && x.t.isAtSameMomentAs(slot));
+      if (has) continue;
+      final last = liveBy[p.uid];
+      var pos = last?.pos;
+      DateTime? posAt = last?.t;
+      if (pos == null) {
+        for (final x in _pings) {
+          if (x.uid == p.uid) {
+            pos = x.pos;
+            posAt = x.t;
+          }
+        }
+      }
+      if (pos == null) continue;
+      try {
+        await _repo.writePingIfMissing(g.code, '${p.uid}_${slot.millisecondsSinceEpoch}', {
+          'uid': p.uid,
+          'name': p.name,
+          'teamId': p.teamId,
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          't': Timestamp.fromDate(slot),
+          'manual': false,
+          'offline': true,
+        });
+        await _repo.addEventOnce(
+            g.code,
+            'miss_${p.uid}_${slot.millisecondsSinceEpoch}',
+            'Ping von ${p.name} fehlte – letzte bekannte Position von ${posAt == null ? '?' : hhmm(posAt)} gesendet',
+            t.color);
+      } catch (e) {
+        debugPrint('Ersatz-Ping: $e');
+      }
+    }
   }
 
   @override
@@ -116,6 +196,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
       s.cancel();
     }
     _clock?.cancel();
+    _watchdog?.cancel();
     _chat.dispose();
     super.dispose();
   }
@@ -366,6 +447,19 @@ class _LeaderScreenState extends State<LeaderScreen> {
             value: '${g.graceSec} s',
             onMinus: g.graceSec <= 0 ? null : () => _do(() => _repo.updateGame(g.code, {'graceSec': g.graceSec - 5})),
             onPlus: g.graceSec >= 60 ? null : () => _do(() => _repo.updateGame(g.code, {'graceSec': g.graceSec + 5})),
+          ),
+          StepperRow(
+            title: 'Offline-Strafe',
+            subtitle: g.offlinePenaltyMin == 0
+                ? 'aus'
+                : 'nach >5 min offline so lange live sichtbar',
+            value: g.offlinePenaltyMin == 0 ? 'aus' : '${g.offlinePenaltyMin} min',
+            onMinus: g.offlinePenaltyMin <= 0
+                ? null
+                : () => _do(() => _repo.updateGame(g.code, {'offlinePenaltyMin': g.offlinePenaltyMin - 5})),
+            onPlus: g.offlinePenaltyMin >= 30
+                ? null
+                : () => _do(() => _repo.updateGame(g.code, {'offlinePenaltyMin': g.offlinePenaltyMin + 5})),
           ),
           StepperRow(
             title: 'Spieldauer',

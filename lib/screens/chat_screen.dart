@@ -5,6 +5,7 @@ import '../chat.dart';
 import '../models.dart';
 import '../repo.dart';
 import '../theme.dart';
+import '../tracker.dart';
 import '../widgets/ui.dart';
 
 const quickTexts = ['Jäger in der Nähe!', 'Bin sicher', 'Treffpunkt?', 'Brauche Hilfe', 'Bewege mich', 'Bleibe hier'];
@@ -46,6 +47,7 @@ class _ChatThreadState extends State<ChatThread> {
   void initState() {
     super.initState();
     widget.watcher.openChannel = widget.channel;
+    Tracker.chatOpen(widget.channel);
     widget.watcher.markRead(widget.channel);
     widget.watcher.addListener(_changed);
   }
@@ -69,6 +71,7 @@ class _ChatThreadState extends State<ChatThread> {
   void dispose() {
     widget.watcher.removeListener(_changed);
     if (widget.watcher.openChannel == widget.channel) widget.watcher.openChannel = null;
+    Tracker.chatOpen(null);
     super.dispose();
   }
 

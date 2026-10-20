@@ -10,7 +10,7 @@ class Notify {
   static bool _ready = false;
   static int _id = 100;
 
-  static Future<void> init() async {
+  static Future<void> init({bool askPermission = true}) async {
     if (kIsWeb || _ready) return;
     try {
       await _plugin.initialize(
@@ -18,17 +18,25 @@ class Notify {
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         ),
       );
-      await _plugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
       _ready = true;
     } catch (e) {
       debugPrint('Benachrichtigungen nicht verfügbar: $e');
+      return;
+    }
+    if (!askPermission) return;
+    try {
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (e) {
+      debugPrint('Benachrichtigungs-Erlaubnis: $e');
     }
   }
 
   static Future<void> message(String title, String body, {bool important = false}) async {
-    HapticFeedback.vibrate();
+    try {
+      await HapticFeedback.vibrate();
+    } catch (_) {}
     if (kIsWeb || !_ready) return;
     try {
       await _plugin.show(

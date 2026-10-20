@@ -67,7 +67,9 @@ service cloud.firestore {
       // Pings: für alle im Spiel sichtbar.
       match /pings/{pingId} {
         allow read: if signedIn();
-        allow create, update: if signedIn() && request.resource.data.uid == request.auth.uid;
+        // Spieler schicken eigene Pings; die Spielleitung darf Ersatz-Pings (offline) anlegen.
+        allow create: if signedIn() && (request.resource.data.uid == request.auth.uid || isLeader(code));
+        allow update: if signedIn() && request.resource.data.uid == request.auth.uid;
         allow delete: if isLeader(code);
       }
 

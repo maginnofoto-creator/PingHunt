@@ -90,6 +90,7 @@ class Game {
   final int graceSec;
   final int durationH;
   final int spectatorDelayMin;
+  final int offlinePenaltyMin;
   final DateTime? startedAt;
   final DateTime? endsAt;
   final DateTime? pingAnchor;
@@ -109,6 +110,7 @@ class Game {
     required this.graceSec,
     required this.durationH,
     required this.spectatorDelayMin,
+    this.offlinePenaltyMin = 5,
     this.startedAt,
     this.endsAt,
     this.pingAnchor,
@@ -175,6 +177,7 @@ class Game {
       graceSec: _int(m['graceSec'], 15),
       durationH: _int(m['durationH'], 24),
       spectatorDelayMin: _int(m['spectatorDelayMin'], 20),
+      offlinePenaltyMin: _int(m['offlinePenaltyMin'], 5),
       startedAt: _ts(m['startedAt']),
       endsAt: _ts(m['endsAt']),
       pingAnchor: _ts(m['pingAnchor']),
@@ -247,8 +250,9 @@ class Ping {
   final LatLng pos;
   final DateTime t;
   final bool manual;
+  final bool offline; // Ersatz-Ping mit letzter bekannter Position
 
-  Ping(this.id, this.uid, this.name, this.teamId, this.pos, this.t, this.manual);
+  Ping(this.id, this.uid, this.name, this.teamId, this.pos, this.t, this.manual, {this.offline = false});
 
   static Ping? fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data();
@@ -258,7 +262,8 @@ class Ping {
     final t = _ts(m['t']);
     if (lat == null || lng == null || t == null) return null;
     return Ping(doc.id, (m['uid'] as String?) ?? '', (m['name'] as String?) ?? '',
-        m['teamId'] as String?, LatLng(lat, lng), t, m['manual'] == true);
+        m['teamId'] as String?, LatLng(lat, lng), t, m['manual'] == true,
+        offline: m['offline'] == true);
   }
 }
 

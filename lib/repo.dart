@@ -238,6 +238,32 @@ class Repo {
   Future<void> writePing(String code, String id, Map<String, dynamic> data) =>
       _pings(code).doc(id).set(data);
 
+  /// Ereignis mit fester ID – wird nur einmal angelegt (auch bei mehreren Leitungs-Geräten).
+  Future<void> addEventOnce(String code, String id, String text, int color) async {
+    try {
+      await _events(code).doc(id).set({
+        'text': text,
+        'color': color,
+        't': Timestamp.fromDate(DateTime.now()),
+      });
+    } catch (_) {
+      // existiert schon
+    }
+  }
+
+  /// Ersatz-Ping (Spielleitung) – nur, wenn der Spieler selbst keinen geschickt hat.
+  Future<void> writePingIfMissing(String code, String id, Map<String, dynamic> data) async {
+    final ref = _pings(code).doc(id);
+    final snap = await ref.get();
+    if (snap.exists) return;
+    await ref.set(data);
+  }
+
+  Future<Player?> getMyPlayer(String code) async {
+    final s = await _players(code).doc(uid).get();
+    return s.exists ? Player.fromDoc(s) : null;
+  }
+
   Future<void> addEvent(String code, String text, int color) => _events(code).add({
         'text': text,
         'color': color,

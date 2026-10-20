@@ -320,7 +320,9 @@ Marker labelMarker({
         point: p.pos,
         color: c,
         size: latest ? 18 : 10,
-        label: latest ? '${p.name} · ${ago(p.t, now)}' : hhmm(p.t),
+        label: latest
+            ? '${p.name}${p.offline ? ' · offline' : ''} · ${ago(p.t, now)}'
+            : '${hhmm(p.t)}${p.offline ? ' ⚠' : ''}',
         opacity: latest ? 1 : (1 - age * 0.12).clamp(0.35, 0.9).toDouble(),
       ));
     }

@@ -33,6 +33,17 @@ def patch_manifest():
     )
     text = re.sub(r"(<manifest[^>]*>\n?)", lambda m: m.group(1) + lines, text, count=1)
     text = re.sub(r'android:label="[^"]*"', 'android:label="PingHunt"', text, count=1)
+    # Hintergrunddienst (flutter_background_service) als Standort-Dienst kennzeichnen
+    if "xmlns:tools" not in text:
+        text = text.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+    if "flutter_background_service.BackgroundService" not in text:
+        service = (
+            '        <service\n'
+            '            android:name="id.flutter.flutter_background_service.BackgroundService"\n'
+            '            android:foregroundServiceType="location"\n'
+            '            tools:replace="android:foregroundServiceType" />\n'
+        )
+        text = text.replace("</application>", service + "    </application>", 1)
     path.write_text(text, encoding="utf-8")
     print("Manifest angepasst")
 

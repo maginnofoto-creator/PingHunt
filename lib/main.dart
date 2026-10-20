@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'config.dart';
 import 'screens/home_screen.dart';
 import 'theme.dart';
+import 'tracker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,7 @@ Future<void> main() async {
       if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }
+      await Tracker.configure();
     } catch (e) {
       startError = 'Verbindung zu Firebase fehlgeschlagen:\n$e';
     }

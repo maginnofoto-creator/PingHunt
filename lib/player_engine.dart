@@ -3,20 +3,24 @@ import 'dart:async';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'geo.dart';
 import 'models.dart';
+import 'notify.dart';
 import 'repo.dart';
 import 'theme.dart';
 
 /// Läuft auf dem Handy eines Spielers: GPS, Pings, Zonen-Regel.
+///
+/// Aktiv (im Hintergrunddienst): sendet Pings, Positionen und Ereignisse.
+/// Passiv (in der App-Ansicht): berechnet nur Anzeige-Werte, schreibt nichts.
 class PlayerEngine extends ChangeNotifier {
-  PlayerEngine(this.code);
+  PlayerEngine(this.code, {this.passive = false});
 
   final String code;
+  final bool passive;
   final _repo = Repo.i;
 
   StreamSubscription<Position>? _posSub;
@@ -52,6 +56,13 @@ class PlayerEngine extends ChangeNotifier {
   DateTime? _lastBattery;
   int? _battery;
   bool _pinging = false;
+  bool _offlineChecked = false;
+
+  /// Kurzer Hinweis per Vibration (+ Benachrichtigung im Hintergrunddienst).
+  void _buzz(String title, String body) {
+    if (passive) return;
+    Notify.message(title, body, important: true);
+  }
 
   LatLng? get latLng =>
       position == null ? null : LatLng(position!.latitude, position!.longitude);
@@ -73,7 +84,7 @@ class PlayerEngine extends ChangeNotifier {
         return;
       }
       var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
+      if (perm == LocationPermission.denied && passive) {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
@@ -82,15 +93,11 @@ class PlayerEngine extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      // Der Hintergrunddienst ist selbst ein Vordergrund-Dienst mit Benachrichtigung.
       final settings = AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
         intervalDuration: const Duration(seconds: 10),
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'PingHunt läuft',
-          notificationText: 'Dein Standort wird für das laufende Spiel verwendet.',
-          enableWakeLock: true,
-        ),
       );
       _posSub = Geolocator.getPositionStream(locationSettings: settings).listen(
         _onPosition,
@@ -121,7 +128,28 @@ class PlayerEngine extends ChangeNotifier {
       _initialisedSlots = true;
     }
     if (g != null && g.isLobby) _initialisedSlots = false;
+    _checkOfflinePenalty();
     notifyListeners();
+  }
+
+  /// Wer lange offline war, ist beim Wiedereinstieg kurz live sichtbar.
+  Future<void> _checkOfflinePenalty() async {
+    final g = game, p = me;
+    if (passive || _offlineChecked || g == null || p == null) return;
+    _offlineChecked = true;
+    if (!_activeHunted || g.offlinePenaltyMin <= 0) return;
+    final seen = p.lastSeen;
+    final now = DateTime.now();
+    if (seen == null || now.difference(seen).inMinutes < 5) return;
+    final until = now.add(Duration(minutes: g.offlinePenaltyMin));
+    if (liveUntil != null && liveUntil!.isAfter(until)) return;
+    liveUntil = until;
+    await _safe(() => _repo.updateMe(code, {'liveUntil': Timestamp.fromDate(until)}));
+    await _safe(() => _repo.addEvent(
+        code,
+        '${p.name} war ${now.difference(seen).inMinutes} min offline – ${g.offlinePenaltyMin} min live sichtbar',
+        myTeam?.color ?? 0xFFFF4D4D));
+    _buzz('Du warst offline', 'Du bist jetzt ${g.offlinePenaltyMin} Minuten live für die Jäger sichtbar.');
   }
 
   bool get _activeHunted =>
@@ -159,6 +187,11 @@ class PlayerEngine extends ChangeNotifier {
       }
     }
 
+    if (passive) {
+      notifyListeners();
+      return;
+    }
+
     if (g != null && _activeHunted) {
       final violating = inside == false || inBlocked != null;
       if (violating) {
@@ -166,7 +199,8 @@ class PlayerEngine extends ChangeNotifier {
         if (!_exitTriggered && now.difference(_outsideSince!).inSeconds >= g.graceSec) {
           _exitTriggered = true;
           liveUntil = now.add(Duration(minutes: g.liveMin));
-          HapticFeedback.vibrate();
+          _buzz('Du bist LIVE sichtbar',
+              'Die Jäger sehen dich jetzt ${g.liveMin} Minuten lang live.');
           await _safe(() => _repo.updateMe(code, {
                 'liveUntil': Timestamp.fromDate(liveUntil!),
                 'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
@@ -187,7 +221,10 @@ class PlayerEngine extends ChangeNotifier {
             .reduce((a, b) => a < b ? a : b);
         if (d < 50 && !_edgeWarned) {
           _edgeWarned = true;
-          HapticFeedback.heavyImpact();
+          _buzz('Achtung: Grenze in ${d.round()} m',
+              inBlocked == null && (distToBlocked ?? double.infinity) < 50
+                  ? 'Gleich beginnt ein Sperrgebiet.'
+                  : 'Gleich verlässt du das Spielfeld.');
         } else if (d > 80) {
           _edgeWarned = false;
         }
@@ -199,7 +236,7 @@ class PlayerEngine extends ChangeNotifier {
       final z = inBlocked;
       if (z != null && _hunterWarnedZone != z.id) {
         _hunterWarnedZone = z.id;
-        HapticFeedback.vibrate();
+        _buzz('Sperrgebiet', 'Du bist im Sperrgebiet „${z.name}“.');
         await _safe(() => _repo.addEvent(
             code, '${me?.name ?? 'Jäger'} (Jäger) ist im Sperrgebiet „${z.name}“', PH.hunterColor));
       } else if (z == null) {
@@ -207,7 +244,7 @@ class PlayerEngine extends ChangeNotifier {
         final d = distToBlocked ?? double.infinity;
         if (d < 50 && !_edgeWarned) {
           _edgeWarned = true;
-          HapticFeedback.heavyImpact();
+          _buzz('Achtung', 'Sperrgebiet in ${d.round()} m.');
         } else if (d > 80) {
           _edgeWarned = false;
         }
@@ -264,10 +301,15 @@ class PlayerEngine extends ChangeNotifier {
   }
 
   Future<void> _onTick() async {
+    if (passive) {
+      notifyListeners();
+      return;
+    }
     final g = game;
     final now = DateTime.now();
 
-    if (_lastBattery == null || now.difference(_lastBattery!).inMinutes >= 5) {
+    // Lebenszeichen alle 2 Minuten (für die Offline-Erkennung der Spielleitung)
+    if (_lastBattery == null || now.difference(_lastBattery!).inMinutes >= 2) {
       _lastBattery = now;
       try {
         _battery = await Battery().batteryLevel;

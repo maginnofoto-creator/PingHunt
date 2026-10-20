@@ -10,6 +10,7 @@ import '../notify.dart';
 import '../player_engine.dart';
 import '../repo.dart';
 import '../theme.dart';
+import '../tracker.dart';
 import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 import 'chat_screen.dart';
@@ -61,8 +62,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _engine = PlayerEngine(widget.code)..addListener(_onEngine);
-    _chat = ChatWatcher(widget.code, notify: !widget.observer)..addListener(_onEngine);
+    // Die App-Ansicht rechnet nur für die Anzeige; Pings & Co. sendet der Hintergrunddienst.
+    _engine = PlayerEngine(widget.code, passive: true)..addListener(_onEngine);
+    _chat = ChatWatcher(widget.code, notify: widget.observer)..addListener(_onEngine);
+    if (!widget.observer) Tracker.start(widget.code);
     Notify.init();
     _updateChat(null);
     if (!widget.observer) _engine.start();
@@ -291,8 +294,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (didPop) return;
         final leave = widget.observer ||
             await confirm(context, 'Spiel verlassen?',
-                'Dein Standort wird dann nicht mehr übertragen und Pings fallen aus.');
-        if (leave && context.mounted) Navigator.of(context).pop();
+                'Dein Standort wird dann nicht mehr übertragen und Pings fallen aus. '
+                'Tipp: Mit der Home-Taste kannst du die App einfach verlassen – das Spiel läuft weiter.');
+        if (!leave) return;
+        if (!widget.observer) await Tracker.stop();
+        if (context.mounted) Navigator.of(context).pop();
       },
       child: Scaffold(
         body: _wideWrap(Stack(

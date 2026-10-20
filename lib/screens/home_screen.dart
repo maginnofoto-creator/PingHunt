@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../repo.dart';
 import '../theme.dart';
+import '../tracker.dart';
 import 'leader_screen.dart';
 import 'player_screen.dart';
 import 'scan_screen.dart';
@@ -33,6 +34,24 @@ class _HomeScreenState extends State<HomeScreen> {
         if (_lastCode != null) _code.text = _lastCode!;
       });
     });
+    _resume();
+  }
+
+  /// Automatisch zurück ins laufende Spiel (z. B. nach versehentlichem Schließen).
+  Future<void> _resume() async {
+    final code = await Tracker.activeGame();
+    if (code == null) return;
+    try {
+      final game = await Repo.i.getGame(code);
+      final me = await Repo.i.getMyPlayer(code);
+      if (game == null || game.isEnded || me == null) {
+        await Tracker.stop();
+        return;
+      }
+      if (!mounted) return;
+      _code.text = code;
+      _open(PlayerScreen(code: code));
+    } catch (_) {}
   }
 
   Future<void> _remember(String code) async {
