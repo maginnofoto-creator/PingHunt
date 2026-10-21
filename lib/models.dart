@@ -277,6 +277,7 @@ class Player {
   final bool observer; // Zentrale im Browser: sieht mit, sendet keinen Standort
   final DateTime? pausedUntil; // Pause-Joker aktiv
   final bool? setupOk; // Standort/Akku-Einstellungen in Ordnung
+  final double? distM; // gelaufene Strecke in Metern
 
   Player({
     required this.uid,
@@ -291,6 +292,7 @@ class Player {
     this.observer = false,
     this.pausedUntil,
     this.setupOk,
+    this.distM,
   });
 
   bool isPaused(DateTime now) => pausedUntil != null && now.isBefore(pausedUntil!);
@@ -320,6 +322,7 @@ class Player {
       observer: m['observer'] == true,
       pausedUntil: _ts(m['pausedUntil']),
       setupOk: m['setupOk'] is bool ? m['setupOk'] as bool : null,
+      distM: _dbl(m['distM']),
     );
   }
 }
@@ -520,4 +523,12 @@ class SpeedRule {
   }
 
   Map<String, dynamic> toMap() => {'enabled': enabled, 'kmh': kmh, 'afterMin': afterMin};
+}
+
+/// Alle aufgezeichneten Daten eines Spiels für die Wiederholung.
+class ReplayData {
+  final List<TrailPos> trail;
+  final List<Ping> pings;
+  final List<GameEvent> events;
+  ReplayData(this.trail, this.pings, this.events);
 }

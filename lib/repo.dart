@@ -40,6 +40,18 @@ class Repo {
       .snapshots()
       .map((q) => q.docs.map(TrailPos.fromDoc).whereType<TrailPos>().toList());
 
+  /// Komplette Daten für die Wiederholung (einmalig geladen).
+  Future<ReplayData> loadReplay(String code) async {
+    final trail = await _trail(code).orderBy('t').get();
+    final pings = await _pings(code).orderBy('t').get();
+    final events = await _events(code).orderBy('t').get();
+    return ReplayData(
+      trail.docs.map(TrailPos.fromDoc).whereType<TrailPos>().toList(),
+      pings.docs.map(Ping.fromDoc).whereType<Ping>().toList(),
+      events.docs.map(GameEvent.fromDoc).toList(),
+    );
+  }
+
   Future<void> saveZones(String code, List<Zone> zones) =>
       gameRef(code).update({'zones': [for (final z in zones) z.toMap()]});
 

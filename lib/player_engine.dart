@@ -70,6 +70,10 @@ class PlayerEngine extends ChangeNotifier {
   final _rnd = math.Random();
   DateTime? _lastProximity;
   DateTime? _fastSince;
+  // Gelaufene Strecke
+  double? _distM;
+  LatLng? _distLast;
+  DateTime? _distLastT;
   bool _speedLive = false;
   DateTime? _lastSpeedWrite;
   DateTime? _lastTurbo;
@@ -250,6 +254,19 @@ class PlayerEngine extends ChangeNotifier {
       }
     }
     _hist.add((now, here));
+    if (g != null && g.isRunning && (isHunter || isHunted) && !(me?.observer ?? false)) {
+      _distM ??= me?.distM ?? 0;
+      if (pos.accuracy <= 30) {
+        if (_distLast != null && _distLastT != null) {
+          final d = metersBetween(_distLast!, here);
+          final dt = now.difference(_distLastT!).inMilliseconds / 1000;
+          // GPS-Sprünge ignorieren (> 60 m/s)
+          if (dt > 0 && d / dt < 60) _distM = _distM! + d;
+        }
+        _distLast = here;
+        _distLastT = now;
+      }
+    }
     while (_hist.isNotEmpty && now.difference(_hist.first.$1).inMinutes > 45) {
       _hist.removeAt(0);
     }
@@ -344,11 +361,10 @@ class PlayerEngine extends ChangeNotifier {
           }));
     }
     // Spur für Zuschauer (nur wenn die Spielleitung sie für diese Rolle freigibt)
-    final showToSpectators =
-        g != null && (isHunter ? g.spec.hunters != 'off' : (isHunted && g.spec.hunted != 'off'));
+    // Spur: für Zuschauer und die Wiederholung nach dem Spiel (immer aufgezeichnet)
     if (g != null &&
         g.isRunning &&
-        showToSpectators &&
+        (isHunter || isHunted) &&
         !isPaused &&
         !(me?.observer ?? false) &&
         !(me?.isCaught ?? false) &&
@@ -385,6 +401,7 @@ class PlayerEngine extends ChangeNotifier {
       await _safe(() => _repo.updateMe(code, {
             'lastSeen': FieldValue.serverTimestamp(),
             if (_battery != null) 'battery': _battery,
+            if (_distM != null) 'distM': _distM!.round(),
           }));
     }
 

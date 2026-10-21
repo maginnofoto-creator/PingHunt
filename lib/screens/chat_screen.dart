@@ -354,13 +354,21 @@ class PlayerChatScreen extends StatelessWidget {
 
 /// Chat-Übersicht für die Spielleitung: Durchsage, Teams, einzelne Spieler.
 class LeaderChatList extends StatelessWidget {
-  const LeaderChatList({super.key, required this.watcher, required this.game, required this.players});
+  const LeaderChatList(
+      {super.key, required this.watcher, required this.game, required this.players, this.onOpen});
 
   final ChatWatcher watcher;
   final Game game;
   final List<Player> players;
 
+  /// Statt eine neue Seite zu öffnen (z. B. im Browser direkt in der Seitenspalte).
+  final void Function(String channel, String title)? onOpen;
+
   void _open(BuildContext context, String channel, String title, {bool quick = false}) {
+    if (onOpen != null) {
+      onOpen!(channel, title);
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(

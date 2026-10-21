@@ -18,6 +18,7 @@ import '../jokers.dart';
 import '../widgets/big_toast.dart';
 import 'chat_screen.dart';
 import 'joker_screen.dart';
+import 'replay_screen.dart';
 
 /// Spielleitung – auf dem Handy als Tabs, im Browser als großes Dashboard.
 class LeaderScreen extends StatefulWidget {
@@ -125,6 +126,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
   final List<CatchReport> _pendingCatches = [];
   bool _catchDialogOpen = false;
   List<MapMark> _marks = [];
+  bool _leftOpen = false; // Browser: Einstellungs-Spalte ausgeklappt
+  (String, String)? _sideChat; // Browser: offener Chat in der rechten Spalte
 
   void _onEffects(List<Effect> list) {
     final g = _game;
@@ -550,6 +553,15 @@ class _LeaderScreenState extends State<LeaderScreen> {
             ),
             icon: const Icon(Icons.draw),
             label: Text(g.area.length >= 3 ? 'Spielfeld bearbeiten' : 'Spielfeld zeichnen'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ReplayScreen(code: g.code)),
+            ),
+            icon: const Icon(Icons.movie),
+            label: const Text('Wiederholung ansehen'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -1148,6 +1160,14 @@ class _LeaderScreenState extends State<LeaderScreen> {
               ),
             ),
           _gpsIcon(live, now),
+          if (p.distM != null && p.distM! > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text(
+                p.distM! < 1000 ? '${p.distM!.round()} m' : '${(p.distM! / 1000).toStringAsFixed(1)} km',
+                style: mono(11, color: PH.muted),
+              ),
+            ),
           if (p.battery != null)
             Text('${p.battery} %', style: mono(11, color: batteryLow ? PH.danger : PH.muted)),
           PopupMenuButton<String>(
@@ -1334,13 +1354,51 @@ class _LeaderScreenState extends State<LeaderScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 380,
-                  child: ListView(
-                    children: [_gamePanel(g, now), const SizedBox(height: 16), _teamsPanel(g, now)],
-                  ),
+                // Einstellungen & Teams: einklappbar, damit die Karte groß ist
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: _leftOpen ? 380 : 48,
+                  child: _leftOpen
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () => setState(() => _leftOpen = false),
+                                icon: const Icon(Icons.chevron_left),
+                                label: const Text('Einklappen'),
+                              ),
+                            ),
+                            Expanded(
+                              child: ListView(
+                                children: [_gamePanel(g, now), const SizedBox(height: 16), _teamsPanel(g, now)],
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            IconButton.filledTonal(
+                              tooltip: 'Einstellungen & Teams ausklappen',
+                              onPressed: () => setState(() => _leftOpen = true),
+                              icon: const Icon(Icons.chevron_right),
+                            ),
+                            const SizedBox(height: 8),
+                            IconButton(
+                              tooltip: 'Spiel & Einstellungen',
+                              onPressed: () => setState(() => _leftOpen = true),
+                              icon: const Icon(Icons.tune),
+                            ),
+                            IconButton(
+                              tooltip: 'Teams',
+                              onPressed: () => setState(() => _leftOpen = true),
+                              icon: const Icon(Icons.groups),
+                            ),
+                          ],
+                        ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(20),
@@ -1349,7 +1407,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
                 ),
                 const SizedBox(width: 16),
                 SizedBox(
-                  width: 340,
+                  width: 360,
                   child: DefaultTabController(
                     length: 2,
                     child: Column(
@@ -1366,7 +1424,36 @@ class _LeaderScreenState extends State<LeaderScreen> {
                           child: TabBarView(
                             children: [
                               ListView(children: [_eventsPanel(now)]),
-                              LeaderChatList(watcher: _chat, game: g, players: _players),
+                              _sideChat == null
+                                  ? LeaderChatList(
+                                      watcher: _chat,
+                                      game: g,
+                                      players: _players,
+                                      onOpen: (ch, title) => setState(() => _sideChat = (ch, title)),
+                                    )
+                                  : Column(
+                                      children: [
+                                        ListTile(
+                                          dense: true,
+                                          leading: IconButton(
+                                            tooltip: 'Zurück zur Übersicht',
+                                            icon: const Icon(Icons.arrow_back),
+                                            onPressed: () => setState(() => _sideChat = null),
+                                          ),
+                                          title: Text(_sideChat!.$2,
+                                              style: const TextStyle(fontWeight: FontWeight.w700)),
+                                        ),
+                                        Expanded(
+                                          child: ChatThread(
+                                            key: ValueKey(_sideChat!.$1),
+                                            watcher: _chat,
+                                            channel: _sideChat!.$1,
+                                            myName: 'Spielleitung',
+                                            fromLeader: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                             ],
                           ),
                         ),
