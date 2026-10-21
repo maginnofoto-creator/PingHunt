@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 
+import '../jokers.dart';
 import '../models.dart';
 import '../repo.dart';
 import '../theme.dart';
 import '../widgets/game_map.dart';
+import '../widgets/big_toast.dart';
 import '../widgets/ui.dart';
 
 /// Zuschauer-Ansicht – was sichtbar ist, legt die Spielleitung fest.
@@ -36,6 +38,32 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
   final Map<String, List<ChatMsg>> _chats = {};
   Timer? _clock;
   Timer? _trailRefresh;
+  final _toasts = ToastQueue();
+  final DateTime _openedAt = DateTime.now();
+  List<CatchReport> _catches = [];
+  List<Effect> _effects = [];
+  final Set<String> _shown = {};
+
+  /// Große Einblendungen für Fänge und Joker – mit der Zuschauer-Verzögerung.
+  void _releaseToasts(Game g, DateTime now) {
+    final delay = Duration(minutes: g.spectatorDelayMin);
+    for (final c in _catches) {
+      final at = c.decidedAt;
+      if (c.status != 'confirmed' || at == null) continue;
+      final showAt = at.add(delay);
+      if (showAt.isBefore(_openedAt) || showAt.isAfter(now) || !_shown.add('c${c.id}')) continue;
+      _toasts.show(ToastItem(Icons.back_hand, 'GEFANGEN!', '${c.targetName} wurde von ${c.byName} gefangen',
+          color: PH.danger));
+    }
+    for (final e in _effects) {
+      final showAt = e.start.add(delay);
+      if (showAt.isBefore(_openedAt) || showAt.isAfter(now) || !_shown.add('e${e.id}')) continue;
+      final d = jokerDef(e.type);
+      if (d == null) continue;
+      final who = d.forHunters ? 'Jäger ${e.byName}' : '${g.team(e.byTeam)?.name ?? ''} · ${e.byName}';
+      _toasts.show(ToastItem(d.icon, d.name, '🃏 $who', color: d.forHunters ? PH.danger : PH.accent));
+    }
+  }
 
   @override
   void initState() {
@@ -51,10 +79,15 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
     _subs.add(_repo.pingsStream(c).listen((p) => setState(() => _pings = p)));
     _subs.add(_repo.eventsStream(c).listen((e) => setState(() => _events = e)));
     _subscribeTrail();
+    _subs.add(_repo.catchesStream(c).listen((l) => _catches = l, onError: (_) {}));
+    _subs.add(_repo.effectsStream(c).listen((l) => _effects = l, onError: (_) {}));
     // Spur-Abfrage regelmäßig erneuern, damit sie nicht endlos wächst
     _trailRefresh = Timer.periodic(const Duration(minutes: 15), (_) => _subscribeTrail());
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      final g = _game;
+      if (g != null) _releaseToasts(g, DateTime.now());
+      setState(() {});
     });
   }
 
@@ -99,6 +132,7 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
     _trailSub?.cancel();
     _clock?.cancel();
     _trailRefresh?.cancel();
+    _toasts.dispose();
     super.dispose();
   }
 
@@ -309,7 +343,15 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
         title: Text('PINGHUNT · Spiel ${g.code} · Zuschauer',
             style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.2)),
       ),
-      body: LayoutBuilder(builder: (context, box) {
+      body: Stack(children: [
+        Positioned.fill(child: _body(map, side)),
+        Positioned.fill(child: BigToastView(queue: _toasts)),
+      ]),
+    );
+  }
+
+  Widget _body(Widget map, Widget side) {
+    return LayoutBuilder(builder: (context, box) {
         if (box.maxWidth >= 900) {
           return Row(
             children: [
@@ -324,8 +366,7 @@ class _SpectatorScreenState extends State<SpectatorScreen> {
             SizedBox(height: 240, child: side),
           ],
         );
-      }),
-    );
+      });
   }
 }
 

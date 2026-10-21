@@ -20,6 +20,7 @@ PERMISSIONS = [
     "android.permission.WAKE_LOCK",
     "android.permission.VIBRATE",
     "android.permission.CAMERA",
+    "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
 ]
 
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,6 +11,7 @@ import '../models.dart';
 import '../notify.dart';
 import '../player_engine.dart';
 import '../repo.dart';
+import '../setup_check.dart';
 import '../theme.dart';
 import '../tracker.dart';
 import '../widgets/game_map.dart';
@@ -29,7 +31,130 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
+  SetupStatus _setup = const SetupStatus();
+  bool _setupShown = false;
+  bool? _setupReported;
+
+  Future<void> _checkSetup({bool openIfMissing = false}) async {
+    if (widget.observer) return;
+    final st = await SetupCheck.check();
+    if (!mounted) return;
+    setState(() => _setup = st);
+    if (_setupReported != st.ok && _me != null) {
+      _setupReported = st.ok;
+      try {
+        await _repo.updateMe(widget.code, {'setupOk': st.ok});
+      } catch (_) {}
+    }
+    if (openIfMissing && !st.ok && !_setupShown) {
+      _setupShown = true;
+      _openSetup();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkSetup();
+  }
+
+  Widget _setupBanner() {
+    if (widget.observer || _setup.ok) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: PH.danger,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _openSetup,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber, color: PH.bg, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${_setup.missing} Einstellung${_setup.missing == 1 ? '' : 'en'} fehlt – sonst kommen keine Pings an',
+                    style: const TextStyle(color: PH.bg, fontWeight: FontWeight.w800, fontSize: 12),
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: PH.bg),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSetup() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: PH.surface,
+      builder: (c) => StatefulBuilder(builder: (c, setLocal) {
+        Future<void> run(Future<void> Function() f) async {
+          await f();
+          final st = await SetupCheck.check();
+          if (mounted) setState(() => _setup = st);
+          setLocal(() {});
+        }
+
+        Widget row(bool ok, String title, String text, Future<void> Function() fix) => ListTile(
+              leading: Icon(ok ? Icons.check_circle : Icons.cancel, color: ok ? PH.good : PH.danger),
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(text, style: const TextStyle(fontSize: 12)),
+              trailing: ok ? null : FilledButton(onPressed: () => run(fix), child: const Text('Einstellen')),
+            );
+
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(8, 16, 8, 16),
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('Damit PingHunt im Hintergrund läuft',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              ),
+              const SizedBox(height: 8),
+              row(_setup.locationAlways, 'Standort: „Immer zulassen“',
+                  'Sonst bekommt der Hintergrunddienst kein GPS und es gehen keine Pings raus.', SetupCheck.fixLocation),
+              row(_setup.precise, 'Genauer Standort',
+                  'Ohne „Genauen Standort verwenden“ ist die Position bis zu mehrere Kilometer ungenau.',
+                  SetupCheck.openSettings),
+              row(_setup.batteryOk, 'Akku: „Keine Einschränkungen“',
+                  'Sonst beendet Android die App im Hintergrund. Tippe auf „Zulassen“.', SetupCheck.fixBattery),
+              row(_setup.notifications, 'Benachrichtigungen',
+                  'Für Chat, Warnungen und „Du bist LIVE“. Empfohlen.', SetupCheck.fixNotifications),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text(
+                  'Xiaomi, Huawei & Co.: zusätzlich in der App-Info „Autostart“ einschalten und PingHunt in der '
+                  'Übersicht der letzten Apps mit dem Schloss sperren.',
+                  style: TextStyle(color: PH.muted, fontSize: 12),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Row(
+                  children: [
+                    OutlinedButton(onPressed: SetupCheck.openSettings, child: const Text('App-Info öffnen')),
+                    const Spacer(),
+                    FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Fertig')),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+    await _checkSetup();
+  }
+
   final _repo = Repo.i;
   final _map = MapController();
   late final PlayerEngine _engine;
@@ -44,6 +169,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<LivePos> _live = [];
   List<GameEvent> _events = [];
   List<Effect> _effects = [];
+  List<MapMark> _marks = [];
   String? _liveTeam;
   bool _gameLoaded = false;
 
@@ -66,7 +192,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     // Die App-Ansicht rechnet nur für die Anzeige; Pings & Co. sendet der Hintergrunddienst.
+    WidgetsBinding.instance.addObserver(this);
     _engine = PlayerEngine(widget.code, passive: true)..addListener(_onEngine);
+    Future.delayed(const Duration(seconds: 2), () => _checkSetup(openIfMissing: true));
     _chat = ChatWatcher(widget.code, notify: widget.observer)..addListener(_onEngine);
     if (!widget.observer) Tracker.start(widget.code);
     Notify.init();
@@ -91,6 +219,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _updateChat(me);
     }));
     _subs.add(_repo.pingsStream(widget.code).listen((ps) => setState(() => _pings = ps)));
+    _subs.add(_repo.marksStream(widget.code).listen((m) => setState(() => _marks = m), onError: (_) {}));
     _subs.add(_repo.effectsStream(widget.code).listen((e) {
       setState(() => _effects = e);
       _engine.setEffects(e);
@@ -147,6 +276,70 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _map.move(_engine.latLng!, 16);
     }
     setState(() {});
+  }
+
+  /// Jäger: lange auf die Karte drücken → Markierung mit Text setzen (15 min sichtbar).
+  Future<void> _addMark(LatLng p) async {
+    final me = _me;
+    final g = _game;
+    if (me == null || g == null || !(g.team(me.teamId)?.isHunter ?? false)) return;
+    final text = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Markierung setzen'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: text,
+              autofocus: true,
+              maxLength: 24,
+              decoration: const InputDecoration(labelText: 'Text, z. B. Treffpunkt'),
+            ),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final q in ['Treffpunkt', 'Hier vermutet', 'Gesehen!', 'Absperren', 'Achtung'])
+                  ActionChip(label: Text(q), onPressed: () => text.text = q),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text('Nur für Jäger sichtbar, verschwindet nach 15 Minuten.',
+                style: TextStyle(fontSize: 12, color: PH.muted)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Abbrechen')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Setzen')),
+        ],
+      ),
+    );
+    if (ok != true || text.text.trim().isEmpty) return;
+    final now = DateTime.now();
+    try {
+      await _repo.addMark(widget.code, {
+        'byName': me.name,
+        'teamId': me.teamId,
+        'text': text.text.trim(),
+        'lat': p.latitude,
+        'lng': p.longitude,
+        't': Timestamp.fromDate(now),
+        'end': Timestamp.fromDate(now.add(const Duration(minutes: 15))),
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Fehler: $e')));
+    }
+  }
+
+  Future<void> _markOptions(MapMark m) async {
+    final del = await confirm(context, m.text, 'Gesetzt von ${m.byName}. Markierung entfernen?');
+    if (del) {
+      try {
+        await _repo.deleteMark(widget.code, m.id);
+      } catch (_) {}
+    }
   }
 
   /// Teams, deren Ping-Verlauf gerade verwischt ist.
@@ -267,6 +460,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _liveSub?.cancel();
     _clock?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _engine.removeListener(_onEngine);
     _chat.removeListener(_onEngine);
     _chat.dispose();
@@ -312,9 +506,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
     if (chosen == null) return;
+    final me = _me;
+    if (me == null) return;
+    await _repo.reportCatch(widget.code, me, chosen);
     await _repo.addEvent(
       widget.code,
-      'Fang gemeldet: ${chosen.name} durch ${_me?.name ?? 'Jäger'} – Spielleitung bitte bestätigen',
+      'Fang gemeldet: ${chosen.name} durch ${me.name} – Spielleitung bitte bestätigen',
       PH.hunterColor,
     );
     if (mounted) {
@@ -363,6 +560,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         label: l.name,
         size: 13,
       ));
+    }
+
+    // Markierungen des eigenen (Jäger-)Teams
+    for (final m in _marks) {
+      if (m.teamId == null || m.teamId != me?.teamId || !now.isBefore(m.end)) continue;
+      markers.add(markMarker(m, now, onTap: () => _markOptions(m)));
     }
 
     if (_sharedPin != null &&
@@ -439,6 +642,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 polylines: polylines,
                 initialCenter: _engine.latLng,
                 zones: [for (final z in g.zones) if (z.visibleTo(_repo.uid, me?.teamId)) z],
+                onLongPress: isHunter ? _addMark : null,
               ),
             ),
             SafeArea(
@@ -447,11 +651,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: _limitWidth(Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _header(g, now),
-                    const SizedBox(height: 8),
-                    _chips(g, me, myTeam),
-                    const SizedBox(height: 8),
+                    _setupBanner(),
                     _statusCard(g, me, myTeam, now),
+                    const SizedBox(height: 4),
+                    _chips(g, me, myTeam),
                     ..._liveBanners(g, myTeam, now),
                     ..._effectBanners(g, me, now),
                   ],
@@ -462,7 +665,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             if (me != null && myTeam != null)
               Positioned(
                 right: 12,
-                bottom: (isHunter ? 196 : 120) + 104,
+                bottom: _bottomHeight(myTeam) + 104,
                 child: FloatingActionButton.small(
                   heroTag: 'joker',
                   backgroundColor: PH.surface,
@@ -474,7 +677,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             Positioned(
               right: 12,
-              bottom: (isHunter ? 196 : 120) + 52,
+              bottom: _bottomHeight(myTeam) + 52,
               child: UnreadBadge(
                 count: _chat.totalUnread,
                 child: FloatingActionButton.small(
@@ -489,7 +692,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
             Positioned(
               right: 12,
-              bottom: isHunter ? 196 : 120,
+              bottom: _bottomHeight(myTeam),
               child: FloatingActionButton.small(
                 heroTag: 'center',
                 backgroundColor: PH.surface,
@@ -602,35 +805,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         )
       : child;
 
-  Widget _header(Game g, DateTime now) {
-    final left = g.endsAt?.difference(now);
-    return Row(
-      children: [
-        const Text('PINGHUNT', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 3)),
-        if (widget.observer) ...[
-          const SizedBox(width: 10),
-          const Pill(dot: PH.accent, child: Text('ZENTRALE · ohne GPS')),
-        ],
-        const Spacer(),
-        if (g.isRunning && left != null)
-          Pill(
-            dot: PH.good,
-            child: Text('${countdown(left)} übrig', style: mono(12)),
-          ),
-      ],
-    );
-  }
+  Widget _header(Game g, DateTime now) => const SizedBox.shrink();
 
   Widget _chips(Game g, Player? me, Team? myTeam) {
     final chips = <Widget>[];
+    if (widget.observer) chips.add(const Pill(dot: PH.accent, child: Text('ZENTRALE · ohne GPS')));
     if (myTeam == null) {
       chips.add(const Pill(child: Text('Noch keinem Team zugeteilt')));
     } else {
       chips.add(Pill(
         filled: Color(myTeam.color),
         child: Text(
-          '${myTeam.isHunter ? 'JÄGER' : 'GEJAGT'} · ${myTeam.name.toUpperCase()}',
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: PH.bg),
+          '${myTeam.isHunter ? 'JÄGER' : 'GEJAGT'} · ${myTeam.name}',
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: PH.bg),
         ),
       ));
     }
@@ -641,88 +828,82 @@ class _PlayerScreenState extends State<PlayerScreen> {
       chips.add(Pill(
         filled: PH.danger,
         child: Text('IM SPERRGEBIET: ${_engine.inBlocked!.name}',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: PH.bg)),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: PH.bg)),
       ));
     } else if ((_engine.distToBlocked ?? double.infinity) < 50) {
-      chips.add(Pill(dot: PH.danger, child: Text('Sperrgebiet in ${_engine.distToBlocked!.round()} m')));
+      chips.add(Pill(dot: PH.danger, child: Text('Sperrgebiet ${_engine.distToBlocked!.round()} m')));
     }
     if (g.area.length >= 3 && _engine.inside != null) {
       final d = _engine.distToEdge;
       chips.add(Pill(
         dot: _engine.inside! ? PH.good : PH.danger,
-        child: Text(_engine.inside!
-            ? 'Im Spielfeld · ${d == null ? '-' : d.round()} m zum Rand'
-            : 'AUSSERHALB des Spielfelds'),
+        child: Text(_engine.inside! ? 'Rand ${d == null ? '-' : d.round()} m' : 'AUSSERHALB'),
       ));
     }
-    return Wrap(spacing: 6, runSpacing: 6, children: chips);
+    return Wrap(spacing: 4, runSpacing: 4, children: chips);
   }
 
+  /// Schmale Statusleiste: nächster Ping, Restzeit, LIVE-Hinweis.
   Widget _statusCard(Game g, Player? me, Team? myTeam, DateTime now) {
     final live = me?.isLive(now) ?? false;
-    final children = <Widget>[];
+    final rows = <Widget>[];
     if (_engine.error != null) {
-      children.add(Text(_engine.error!, style: const TextStyle(color: PH.danger)));
+      rows.add(Text(_engine.error!, style: const TextStyle(color: PH.danger, fontSize: 12)));
     }
     if (g.isLobby) {
-      children.add(const Text('Warte auf den Spielstart …',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)));
-      children.add(const SizedBox(height: 4));
-      children.add(Text(
+      rows.add(Text(
         myTeam == null
-            ? (widget.observer
-                ? 'Die Spielleitung muss dich als Zentrale einem Team zuteilen.'
-                : 'Die Spielleitung teilt dich gleich einem Team zu.')
-            : 'Du bist in ${myTeam.name}.',
-        style: const TextStyle(color: PH.muted),
+            ? (widget.observer ? 'Warte auf Team-Zuteilung (Zentrale)' : 'Warte auf Team-Zuteilung …')
+            : 'Warte auf den Spielstart · ${myTeam.name}',
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
       ));
     } else if (g.isEnded) {
-      children.add(const Text('Spiel beendet', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)));
+      rows.add(const Text('Spiel beendet', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)));
     } else {
       final next = g.nextPing(now);
       final headStart = g.pingAnchor != null && now.isBefore(g.pingAnchor!);
-      children.add(Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      final left = g.endsAt?.difference(now);
+      rows.add(Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(headStart ? 'VORSPRUNG · ERSTER PING' : 'NÄCHSTER PING', style: label()),
-              Text(next == null ? '--:--' : countdown(next.difference(now)),
-                  style: mono(40, color: PH.accent)),
-            ],
-          ),
+          Text(headStart ? 'VORSPRUNG ' : 'PING ', style: label()),
+          Text(next == null ? '--:--' : countdown(next.difference(now)), style: mono(18, color: PH.accent)),
+          const SizedBox(width: 8),
+          Text('· alle ${g.intervalMin} min', style: const TextStyle(color: PH.muted, fontSize: 11)),
           const Spacer(),
-          Text(
-            'Intervall ${g.intervalMin} min\n${(myTeam?.isHunter ?? false) ? 'Dann siehst du die Gejagten' : 'Dann sehen dich die Jäger'}',
-            textAlign: TextAlign.right,
-            style: const TextStyle(color: PH.muted, fontSize: 12, height: 1.4),
-          ),
+          if (left != null) Text('${countdown(left)} übrig', style: mono(11, color: PH.muted)),
         ],
       ));
     }
-    if (live) {
-      children.add(const SizedBox(height: 10));
-      children.add(Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: PH.danger, borderRadius: BorderRadius.circular(12)),
+    if (live && me?.liveUntil != null) {
+      rows.add(const SizedBox(height: 6));
+      rows.add(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(color: PH.danger, borderRadius: BorderRadius.circular(10)),
         child: Text(
           'Du bist LIVE sichtbar – noch ${countdown(me!.liveUntil!.difference(now))}',
-          style: const TextStyle(color: PH.bg, fontWeight: FontWeight.w800),
+          style: const TextStyle(color: PH.bg, fontWeight: FontWeight.w800, fontSize: 12),
         ),
       ));
     }
-    return Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children));
+    return Panel(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+    );
   }
+
+  /// Höhe des unteren Bereichs (für die Position der runden Knöpfe).
+  double _bottomHeight(Team? myTeam) =>
+      (myTeam?.isHunter ?? false) ? 112 : (widget.observer ? 60 : 16);
 
   Widget _bottomPanel(Game g, Player? me, Team? myTeam) {
     final isHunter = myTeam?.isHunter ?? false;
+    if (!isHunter && !widget.observer) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
       decoration: const BoxDecoration(
         color: PH.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         border: Border(top: BorderSide(color: PH.line)),
       ),
       child: SafeArea(
@@ -734,32 +915,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   Row(
                     children: [
-                      Text('Ping-Verlauf', style: label()),
-                      const Spacer(),
-                      SegmentedButton<int>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: 1, label: Text('Letzter')),
-                          ButtonSegment(value: 3, label: Text('3')),
-                          ButtonSegment(value: 6, label: Text('6')),
-                          ButtonSegment(value: 0, label: Text('Alle')),
-                        ],
-                        selected: {_history},
-                        onSelectionChanged: (s) => setState(() => _history = s.first),
+                      Expanded(
+                        child: SegmentedButton<int>(
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                          segments: const [
+                            ButtonSegment(value: 1, label: Text('Letzter')),
+                            ButtonSegment(value: 3, label: Text('3')),
+                            ButtonSegment(value: 6, label: Text('6')),
+                            ButtonSegment(value: 0, label: Text('Alle')),
+                          ],
+                          selected: {_history},
+                          onSelectionChanged: (s) => setState(() => _history = s.first),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+                        onPressed: g.isRunning ? _reportCatch : null,
+                        icon: const Icon(Icons.back_hand, size: 18),
+                        label: const Text('Fang'),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
                       children: [
                         for (final t in g.teamList.where((t) => !t.isHunter))
                           Padding(
-                            padding: const EdgeInsets.only(right: 6),
+                            padding: const EdgeInsets.only(right: 6, top: 4),
                             child: FilterChip(
-                              avatar: Dot(Color(t.color)),
-                              label: Text(t.name),
+                              visualDensity: VisualDensity.compact,
+                              avatar: Dot(Color(t.color), size: 10),
+                              label: Text(t.name, style: const TextStyle(fontSize: 12)),
                               selected: _teamFilter.contains(t.id),
                               onSelected: (v) => setState(() {
                                 v ? _teamFilter.add(t.id) : _teamFilter.remove(t.id);
@@ -769,24 +959,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
-                    onPressed: g.isRunning ? _reportCatch : null,
-                    icon: const Icon(Icons.back_hand),
-                    label: const Text('Fang melden'),
-                  ),
                 ],
               )
             : Text(
-                widget.observer
-                    ? (myTeam == null
-                        ? 'Die Spielleitung muss dich noch einem Team zuteilen. Danach siehst du hier, was dein Team sieht.'
-                        : 'Zentrale von ${myTeam.name}: Du siehst dein Team live. Dein eigener Standort wird nicht gesendet.')
-                    : myTeam == null
-                    ? 'Sobald du in einem Team bist, siehst du hier deine Mitspieler.'
-                    : 'Dein Team sieht dich live. Die Jäger sehen dich nur beim Ping – '
-                        'oder ${g.liveMin} Minuten lang, wenn du das Spielfeld verlässt.',
-                style: const TextStyle(color: PH.muted, height: 1.4),
+                myTeam == null
+                    ? 'Die Spielleitung muss dich noch einem Team zuteilen.'
+                    : 'Zentrale von ${myTeam.name} – ohne eigenen Standort.',
+                style: const TextStyle(color: PH.muted, fontSize: 12),
               ),
       ),
     );

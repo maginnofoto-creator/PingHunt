@@ -156,6 +156,7 @@ class Game {
   final SpecSettings spec;
   final Map<String, dynamic> jokers; // Joker-Einstellungen (siehe jokers.dart)
   final bool jokerReveal; // Gegner erfahren, welcher Joker eingesetzt wurde
+  final SpeedRule speedRule;
   final DateTime? startedAt;
   final DateTime? endsAt;
   final DateTime? pingAnchor;
@@ -179,6 +180,7 @@ class Game {
     this.spec = const SpecSettings(),
     this.jokers = const {},
     this.jokerReveal = false,
+    this.speedRule = const SpeedRule(),
     this.startedAt,
     this.endsAt,
     this.pingAnchor,
@@ -249,6 +251,7 @@ class Game {
       spec: SpecSettings.fromMap(m['spec']),
       jokers: m['jokers'] is Map ? Map<String, dynamic>.from(m['jokers'] as Map) : const {},
       jokerReveal: m['jokerReveal'] == true,
+      speedRule: SpeedRule.fromMap(m['speedRule']),
       startedAt: _ts(m['startedAt']),
       endsAt: _ts(m['endsAt']),
       pingAnchor: _ts(m['pingAnchor']),
@@ -273,6 +276,7 @@ class Player {
   final DateTime? exposedAt;
   final bool observer; // Zentrale im Browser: sieht mit, sendet keinen Standort
   final DateTime? pausedUntil; // Pause-Joker aktiv
+  final bool? setupOk; // Standort/Akku-Einstellungen in Ordnung
 
   Player({
     required this.uid,
@@ -286,6 +290,7 @@ class Player {
     this.exposedAt,
     this.observer = false,
     this.pausedUntil,
+    this.setupOk,
   });
 
   bool isPaused(DateTime now) => pausedUntil != null && now.isBefore(pausedUntil!);
@@ -314,6 +319,7 @@ class Player {
       exposedAt: exposedAt,
       observer: m['observer'] == true,
       pausedUntil: _ts(m['pausedUntil']),
+      setupOk: m['setupOk'] is bool ? m['setupOk'] as bool : null,
     );
   }
 }
@@ -351,8 +357,9 @@ class LivePos {
   final String? teamId;
   final LatLng pos;
   final DateTime? t;
+  final double? acc; // GPS-Genauigkeit in Metern
 
-  LivePos(this.uid, this.name, this.teamId, this.pos, this.t);
+  LivePos(this.uid, this.name, this.teamId, this.pos, this.t, {this.acc});
 
   static LivePos? fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data();
@@ -361,7 +368,7 @@ class LivePos {
     final lng = _dbl(m['lng']);
     if (lat == null || lng == null) return null;
     return LivePos(doc.id, (m['name'] as String?) ?? '', m['teamId'] as String?,
-        LatLng(lat, lng), _ts(m['t']));
+        LatLng(lat, lng), _ts(m['t']), acc: _dbl(m['acc']));
   }
 }
 
@@ -441,4 +448,76 @@ class ChatMsg {
       t,
     );
   }
+}
+
+/// Gemeldeter Fang (wird von der Spielleitung bestätigt oder abgelehnt).
+class CatchReport {
+  final String id;
+  final String by;
+  final String byName;
+  final String target;
+  final String targetName;
+  final String? teamId;
+  final DateTime t;
+  final String status; // pending, confirmed, rejected
+  final DateTime? decidedAt;
+
+  CatchReport(this.id, this.by, this.byName, this.target, this.targetName, this.teamId, this.t, this.status,
+      this.decidedAt);
+
+  static CatchReport? fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data();
+    if (m == null) return null;
+    final t = _ts(m['t']);
+    if (t == null) return null;
+    return CatchReport(
+      d.id,
+      (m['by'] as String?) ?? '',
+      (m['byName'] as String?) ?? '',
+      (m['target'] as String?) ?? '',
+      (m['targetName'] as String?) ?? '',
+      m['teamId'] as String?,
+      t,
+      (m['status'] as String?) ?? 'pending',
+      _ts(m['decidedAt']),
+    );
+  }
+}
+
+/// Markierung der Jäger auf der Karte (verschwindet nach Ablauf).
+class MapMark {
+  final String id;
+  final String by;
+  final String byName;
+  final String? teamId;
+  final String text;
+  final LatLng pos;
+  final DateTime end;
+
+  MapMark(this.id, this.by, this.byName, this.teamId, this.text, this.pos, this.end);
+
+  static MapMark? fromDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    final m = d.data();
+    if (m == null) return null;
+    final lat = _dbl(m['lat']), lng = _dbl(m['lng']), end = _ts(m['end']);
+    if (lat == null || lng == null || end == null) return null;
+    return MapMark(d.id, (m['by'] as String?) ?? '', (m['byName'] as String?) ?? '', m['teamId'] as String?,
+        (m['text'] as String?) ?? '', LatLng(lat, lng), end);
+  }
+}
+
+/// Fahrzeug-Regel: Wer schneller als [kmh] ist, wird live sichtbar.
+class SpeedRule {
+  final bool enabled;
+  final int kmh;
+  final int afterMin;
+  const SpeedRule({this.enabled = false, this.kmh = 10, this.afterMin = 3});
+
+  static SpeedRule fromMap(dynamic m) {
+    if (m is! Map) return const SpeedRule();
+    int n(dynamic v, int f) => v is num ? v.toInt() : f;
+    return SpeedRule(enabled: m['enabled'] == true, kmh: n(m['kmh'], 10), afterMin: n(m['afterMin'], 3));
+  }
+
+  Map<String, dynamic> toMap() => {'enabled': enabled, 'kmh': kmh, 'afterMin': afterMin};
 }

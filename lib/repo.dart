@@ -262,7 +262,7 @@ class Repo {
 
   /// Spiel mit allen Daten löschen (nur Spielleitung).
   Future<void> deleteGame(String code) async {
-    for (final sub in ['pings', 'trail', 'live', 'messages', 'events', 'effects', 'players', 'secret']) {
+    for (final sub in ['pings', 'trail', 'live', 'messages', 'events', 'effects', 'catches', 'marks', 'players', 'secret']) {
       while (true) {
         final q = await gameRef(code).collection(sub).limit(300).get();
         if (q.docs.isEmpty) break;
@@ -282,6 +282,45 @@ class Repo {
       await gameRef(code).collection('leaders').doc(uid).delete();
     } catch (_) {}
   }
+
+  // ---------- Fänge ----------
+
+  Stream<List<CatchReport>> catchesStream(String code) => gameRef(code)
+      .collection('catches')
+      .snapshots()
+      .map((q) => q.docs.map(CatchReport.fromDoc).whereType<CatchReport>().toList()
+        ..sort((a, b) => a.t.compareTo(b.t)));
+
+  Future<void> reportCatch(String code, Player hunter, Player target) =>
+      gameRef(code).collection('catches').add({
+        'by': uid,
+        'byName': hunter.name,
+        'target': target.uid,
+        'targetName': target.name,
+        'teamId': target.teamId,
+        't': Timestamp.fromDate(DateTime.now()),
+        'status': 'pending',
+      });
+
+  Future<void> decideCatch(String code, CatchReport c, bool confirmed) async {
+    await gameRef(code).collection('catches').doc(c.id).update({
+      'status': confirmed ? 'confirmed' : 'rejected',
+      'decidedAt': Timestamp.fromDate(DateTime.now()),
+    });
+    if (confirmed) await setPlayerStatus(code, c.target, 'caught');
+  }
+
+  // ---------- Markierungen ----------
+
+  Stream<List<MapMark>> marksStream(String code) => gameRef(code)
+      .collection('marks')
+      .snapshots()
+      .map((q) => q.docs.map(MapMark.fromDoc).whereType<MapMark>().toList());
+
+  Future<void> addMark(String code, Map<String, dynamic> data) =>
+      gameRef(code).collection('marks').add({...data, 'by': uid});
+
+  Future<void> deleteMark(String code, String id) => gameRef(code).collection('marks').doc(id).delete();
 
   // ---------- Joker ----------
 

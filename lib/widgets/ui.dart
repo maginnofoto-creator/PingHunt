@@ -41,14 +41,14 @@ class Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: filled ?? PH.surface,
           borderRadius: BorderRadius.circular(999),
           border: filled == null ? Border.all(color: PH.line) : null,
         ),
         child: DefaultTextStyle.merge(
-          style: const TextStyle(fontSize: 12, color: PH.text),
+          style: const TextStyle(fontSize: 11, color: PH.text),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

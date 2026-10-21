@@ -196,6 +196,9 @@ Future<void> trackerMain(ServiceInstance service) async {
         await shutdown();
         return;
       }
+      if (me != null && !me!.isCaught && mine.isCaught) {
+        Notify.message('🎯 Du wurdest gefangen!', 'Die Spielleitung hat deinen Fang bestätigt.', important: true);
+      }
       me = mine;
       eng.update(game, mine);
       refreshChat();
@@ -249,6 +252,18 @@ Future<void> trackerMain(ServiceInstance service) async {
       }
     }, onError: (_) {}));
     subs.add(repo.liveStream(code).listen(eng.setOthers, onError: (_) {}));
+
+    // Eigene Fang-Meldungen: Ergebnis melden
+    final decided = <String>{};
+    subs.add(repo.catchesStream(code).listen((list) {
+      for (final c in list) {
+        if (c.by != repo.uid || c.status == 'pending' || !decided.add(c.id)) continue;
+        if (c.decidedAt == null || c.decidedAt!.isBefore(startedAt)) continue;
+        Notify.message(c.status == 'confirmed' ? '🎯 Fang bestätigt!' : 'Fang abgelehnt',
+            '${c.targetName}${c.status == 'confirmed' ? ' ist gefangen.' : ' – die Spielleitung hat abgelehnt.'}',
+            important: true);
+      }
+    }, onError: (_) {}));
 
     await eng.start();
 

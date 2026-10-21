@@ -141,6 +141,7 @@ class GameMap extends StatelessWidget {
     this.polylines = const [],
     this.initialCenter,
     this.zones = const [],
+    this.onLongPress,
   });
 
   final MapController controller;
@@ -149,6 +150,7 @@ class GameMap extends StatelessWidget {
   final List<Polyline> polylines;
   final LatLng? initialCenter;
   final List<Zone> zones;
+  final void Function(LatLng)? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -163,6 +165,7 @@ class GameMap extends StatelessWidget {
                 padding: const EdgeInsets.all(48),
               )
             : null,
+        onLongPress: onLongPress == null ? null : (_, p) => onLongPress!(p),
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
         ),
@@ -333,4 +336,36 @@ Marker labelMarker({
     }
   }
   return (lines, markers);
+}
+
+/// Markierung der Jäger (Fahne mit Text). [onTap] z. B. zum Löschen.
+Marker markMarker(MapMark m, DateTime now, {VoidCallback? onTap}) {
+  final left = m.end.difference(now).inMinutes + 1;
+  return Marker(
+    point: m.pos,
+    width: 160,
+    height: 64,
+    alignment: Alignment.topCenter,
+    child: GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEEF1F5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: PH.danger, width: 2),
+            ),
+            child: Text('${m.text} · ${left}m',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: PH.bg, fontSize: 11, fontWeight: FontWeight.w800)),
+          ),
+          const Icon(Icons.flag, color: PH.danger, size: 26),
+        ],
+      ),
+    ),
+  );
 }

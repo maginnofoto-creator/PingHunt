@@ -69,6 +69,9 @@ class PlayerEngine extends ChangeNotifier {
   final Set<String> _done = {};
   final _rnd = math.Random();
   DateTime? _lastProximity;
+  DateTime? _fastSince;
+  bool _speedLive = false;
+  DateTime? _lastSpeedWrite;
   DateTime? _lastTurbo;
 
   void setEffects(List<Effect> list) {
@@ -236,11 +239,22 @@ class PlayerEngine extends ChangeNotifier {
       return;
     }
 
+    // Geschwindigkeit (für die Fahrzeug-Regel)
+    double kmh = pos.speed > 0 ? pos.speed * 3.6 : 0;
+    if (_hist.isNotEmpty) {
+      final (t0, p0) = _hist.last;
+      final dt = now.difference(t0).inMilliseconds / 1000;
+      if (dt >= 5 && dt <= 120) {
+        final derived = metersBetween(p0, here) / dt * 3.6;
+        if (pos.speed <= 0) kmh = derived;
+      }
+    }
     _hist.add((now, here));
     while (_hist.isNotEmpty && now.difference(_hist.first.$1).inMinutes > 45) {
       _hist.removeAt(0);
     }
     if (g != null && _activeHunted) await _jokerPosition(g, here, now);
+    if (g != null && _activeHunted && !isPaused) await _speedCheck(g, here, now, kmh);
 
     if (g != null && _activeHunted && !isPaused && !_freepass) {
       final violating = inside == false || inBlocked != null;
@@ -524,6 +538,38 @@ class PlayerEngine extends ChangeNotifier {
       if (nearest != null && nearest < prox.p2) {
         _lastProximity = now;
         _buzz('⚠ Jäger in der Nähe!', 'Ein Jäger ist ca. ${nearest.round()} m entfernt.');
+      }
+    }
+  }
+
+  /// Fahrzeug-Regel: mehr als X km/h für 30 Sekunden → live sichtbar (plus Nachlaufzeit).
+  Future<void> _speedCheck(Game g, LatLng here, DateTime now, double kmh) async {
+    final rule = g.speedRule;
+    if (!rule.enabled) return;
+    if (kmh <= rule.kmh) {
+      _fastSince = null;
+      _speedLive = false;
+      return;
+    }
+    _fastSince ??= now;
+    if (now.difference(_fastSince!).inSeconds < 30) return;
+    final until = now.add(Duration(minutes: rule.afterMin));
+    if (!_speedLive) {
+      _speedLive = true;
+      await _safe(() => _repo.addEvent(
+          code,
+          '${me?.name ?? 'Spieler'} (${myTeam?.name ?? ''}) ist schnell unterwegs (ca. ${kmh.round()} km/h) – live sichtbar',
+          myTeam?.color ?? 0xFFFF4D4D));
+      _buzz('🚗 Zu schnell!', 'Über ${rule.kmh} km/h – du bist jetzt live sichtbar.');
+    }
+    if (_lastSpeedWrite == null || now.difference(_lastSpeedWrite!).inSeconds >= 30) {
+      _lastSpeedWrite = now;
+      if (liveUntil == null || liveUntil!.isBefore(until)) {
+        liveUntil = until;
+        await _safe(() => _repo.updateMe(code, {
+              'liveUntil': Timestamp.fromDate(until),
+              'exposed': {'lat': here.latitude, 'lng': here.longitude, 't': Timestamp.fromDate(now)},
+            }));
       }
     }
   }

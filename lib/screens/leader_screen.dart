@@ -14,6 +14,8 @@ import '../theme.dart';
 import '../widgets/game_map.dart';
 import '../widgets/ui.dart';
 import 'area_editor.dart';
+import '../jokers.dart';
+import '../widgets/big_toast.dart';
 import 'chat_screen.dart';
 import 'joker_screen.dart';
 
@@ -106,6 +108,9 @@ class _LeaderScreenState extends State<LeaderScreen> {
     _subs.add(_repo.liveStream(c).listen((l) => setState(() => _live = l), onError: (_) {}));
     _subs.add(_repo.eventsStream(c).listen((e) => setState(() => _events = e)));
     _subs.add(_repo.pinStream(c).listen((p) => setState(() => _pin = p), onError: (_) {}));
+    _subs.add(_repo.catchesStream(c).listen(_onCatches, onError: (_) {}));
+    _subs.add(_repo.marksStream(c).listen((m) => setState(() => _marks = m), onError: (_) {}));
+    _subs.add(_repo.effectsStream(c).listen(_onEffects, onError: (_) {}));
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -113,6 +118,113 @@ class _LeaderScreenState extends State<LeaderScreen> {
   }
 
   Timer? _watchdog;
+  final _toasts = ToastQueue();
+  final DateTime _openedAt = DateTime.now();
+  final Set<String> _seenEffects = {};
+  final Set<String> _seenCatches = {};
+  final List<CatchReport> _pendingCatches = [];
+  bool _catchDialogOpen = false;
+  List<MapMark> _marks = [];
+
+  void _onEffects(List<Effect> list) {
+    final g = _game;
+    for (final e in list) {
+      if (!_seenEffects.add(e.id)) continue;
+      if (g == null || e.start.isBefore(_openedAt)) continue;
+      final d = jokerDef(e.type);
+      if (d == null) continue;
+      final who = d.forHunters ? 'Jäger ${e.byName}' : '${g.team(e.byTeam)?.name ?? ''} · ${e.byName}';
+      _toasts.show(ToastItem(d.icon, d.name, '🃏 $who', color: d.forHunters ? PH.danger : PH.accent));
+    }
+  }
+
+  void _onCatches(List<CatchReport> list) {
+    for (final c in list) {
+      if (c.status != 'pending' || !_seenCatches.add(c.id)) continue;
+      _pendingCatches.add(c);
+    }
+    _showNextCatch();
+  }
+
+  /// Großes Fenster: gemeldeten Fang bestätigen oder ablehnen.
+  Future<void> _showNextCatch() async {
+    if (_catchDialogOpen || _pendingCatches.isEmpty || !mounted) return;
+    final g = _game;
+    if (g == null) return;
+    _catchDialogOpen = true;
+    final c = _pendingCatches.removeAt(0);
+    Notify.message('🎯 Fang gemeldet', '${c.byName} meldet: ${c.targetName} gefangen');
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.back_hand, size: 48, color: PH.danger),
+        title: const Text('Fang gemeldet!', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+        content: Text(
+          '${c.byName} meldet:\n${c.targetName} (${g.team(c.teamId)?.name ?? ''}) wurde gefangen.\n\nGemeldet um ${hhmm(c.t)}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 18),
+        ),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(ctx, false),
+            icon: const Icon(Icons.close),
+            label: const Text('Ablehnen'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.check),
+            label: const Text('Bestätigen'),
+          ),
+        ],
+      ),
+    );
+    _catchDialogOpen = false;
+    if (result != null) {
+      try {
+        await _repo.decideCatch(g.code, c, result);
+        await _repo.addEvent(
+          g.code,
+          result
+              ? '🎯 ${c.targetName} wurde von ${c.byName} gefangen'
+              : 'Fang von ${c.targetName} (gemeldet von ${c.byName}) wurde abgelehnt',
+          result ? PH.hunterColor : 0xFF9AA4B2,
+        );
+        if (result) {
+          _toasts.show(ToastItem(Icons.back_hand, 'GEFANGEN!', '${c.targetName} von ${c.byName}',
+              color: PH.danger));
+        }
+      } catch (e) {
+        _msg('Fehler: $e');
+      }
+    }
+    _showNextCatch();
+  }
+
+  /// GPS-Genauigkeit als Ampel.
+  Widget _gpsIcon(LivePos? l, DateTime now) {
+    final acc = l?.acc;
+    if (acc == null || l?.t == null || now.difference(l!.t!).inMinutes >= 5) return const SizedBox.shrink();
+    final color = acc <= 15 ? PH.good : (acc <= 40 ? const Color(0xFFFFB020) : PH.danger);
+    return Tooltip(
+      message: 'GPS ±${acc.round()} m',
+      child: Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: Icon(Icons.gps_fixed, size: 15, color: color),
+      ),
+    );
+  }
+
+  Future<void> _sendHint(Game g, Player p, String text) async {
+    try {
+      await _repo.sendMessage(g.code,
+          channel: 'dm:${p.uid}', fromName: 'Spielleitung', fromLeader: true, text: text);
+      _msg('Hinweis an ${p.name} gesendet');
+    } catch (e) {
+      _msg('Fehler: $e');
+    }
+  }
   final Set<String> _offlineReported = {};
   DateTime? _lastSlotChecked;
 
@@ -198,6 +310,7 @@ class _LeaderScreenState extends State<LeaderScreen> {
     }
     _clock?.cancel();
     _watchdog?.cancel();
+    _toasts.dispose();
     _chat.dispose();
     super.dispose();
   }
@@ -218,6 +331,9 @@ class _LeaderScreenState extends State<LeaderScreen> {
     final (lines, pingMarkers) =
         pingHistory(game: g, pings: _pings, count: _history, now: now);
     final markers = <Marker>[...pingMarkers];
+    for (final m in _marks) {
+      if (now.isBefore(m.end)) markers.add(markMarker(m, now));
+    }
     final byUid = {for (final p in _players) p.uid: p};
     for (final l in _live) {
       final p = byUid[l.uid];
@@ -480,6 +596,49 @@ class _LeaderScreenState extends State<LeaderScreen> {
             onMinus: g.graceSec <= 0 ? null : () => _do(() => _repo.updateGame(g.code, {'graceSec': g.graceSec - 5})),
             onPlus: g.graceSec >= 60 ? null : () => _do(() => _repo.updateGame(g.code, {'graceSec': g.graceSec + 5})),
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Fahrzeug-Regel', style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(
+              g.speedRule.enabled
+                  ? 'Gejagte schneller als ${g.speedRule.kmh} km/h (30 s) → live + ${g.speedRule.afterMin} min'
+                  : 'Auto/Fahrrad erkennen und live zeigen',
+              style: const TextStyle(fontSize: 12),
+            ),
+            value: g.speedRule.enabled,
+            onChanged: (v) => _do(() => _repo.updateGame(g.code,
+                {'speedRule': SpeedRule(enabled: v, kmh: g.speedRule.kmh, afterMin: g.speedRule.afterMin).toMap()})),
+          ),
+          if (g.speedRule.enabled) ...[
+            StepperRow(
+              title: 'Ab Geschwindigkeit',
+              value: '${g.speedRule.kmh} km/h',
+              onMinus: g.speedRule.kmh <= 5
+                  ? null
+                  : () => _do(() => _repo.updateGame(g.code, {
+                        'speedRule': SpeedRule(enabled: true, kmh: g.speedRule.kmh - 1, afterMin: g.speedRule.afterMin).toMap()
+                      })),
+              onPlus: g.speedRule.kmh >= 50
+                  ? null
+                  : () => _do(() => _repo.updateGame(g.code, {
+                        'speedRule': SpeedRule(enabled: true, kmh: g.speedRule.kmh + 1, afterMin: g.speedRule.afterMin).toMap()
+                      })),
+            ),
+            StepperRow(
+              title: 'Danach noch live',
+              value: '${g.speedRule.afterMin} min',
+              onMinus: g.speedRule.afterMin <= 1
+                  ? null
+                  : () => _do(() => _repo.updateGame(g.code, {
+                        'speedRule': SpeedRule(enabled: true, kmh: g.speedRule.kmh, afterMin: g.speedRule.afterMin - 1).toMap()
+                      })),
+              onPlus: g.speedRule.afterMin >= 30
+                  ? null
+                  : () => _do(() => _repo.updateGame(g.code, {
+                        'speedRule': SpeedRule(enabled: true, kmh: g.speedRule.kmh, afterMin: g.speedRule.afterMin + 1).toMap()
+                      })),
+            ),
+          ],
           StepperRow(
             title: 'Offline-Strafe',
             subtitle: g.offlinePenaltyMin == 0
@@ -980,6 +1139,15 @@ class _LeaderScreenState extends State<LeaderScreen> {
               padding: EdgeInsets.only(right: 6),
               child: Tooltip(message: 'Seit über 5 min kein Standort', child: Icon(Icons.wifi_off, size: 15, color: PH.muted)),
             ),
+          if (p.setupOk == false)
+            const Padding(
+              padding: EdgeInsets.only(right: 6),
+              child: Tooltip(
+                message: 'Standort/Akku-Einstellungen fehlen',
+                child: Icon(Icons.warning_amber, size: 15, color: PH.danger),
+              ),
+            ),
+          _gpsIcon(live, now),
           if (p.battery != null)
             Text('${p.battery} %', style: mono(11, color: batteryLow ? PH.danger : PH.muted)),
           PopupMenuButton<String>(
@@ -990,6 +1158,17 @@ class _LeaderScreenState extends State<LeaderScreen> {
               if (v == 'free') _do(() => _repo.setPlayerStatus(g.code, p.uid, 'free'));
               if (v == 'none') _do(() => _repo.setPlayerTeam(g.code, p.uid, null));
               if (v == 'remove') _do(() => _repo.removePlayer(g.code, p.uid));
+              if (v == 'gps') {
+                final acc = live?.acc;
+                _sendHint(g, p,
+                    '📡 Dein GPS ist gerade ungenau${acc == null ? '' : ' (±${acc.round()} m)'}. Geh möglichst ins Freie '
+                    'und prüfe, ob „Genauen Standort verwenden“ eingeschaltet ist.');
+              }
+              if (v == 'setup') {
+                _sendHint(g, p,
+                    '⚠ Bei dir fehlen Einstellungen: Standort „Immer zulassen“ und Akku „Keine Einschränkungen“. '
+                    'Tippe in PingHunt oben auf den roten Hinweis.');
+              }
               if (v == 'msg') {
                 Navigator.push(
                   context,
@@ -1011,6 +1190,8 @@ class _LeaderScreenState extends State<LeaderScreen> {
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'msg', child: Text('Nachricht schreiben')),
+              const PopupMenuItem(value: 'gps', child: Text('Hinweis: GPS schlecht')),
+              const PopupMenuItem(value: 'setup', child: Text('Hinweis: Einstellungen prüfen')),
               const PopupMenuDivider(),
               for (final t in g.teamList)
                 if (t.id != p.teamId)
@@ -1133,6 +1314,13 @@ class _LeaderScreenState extends State<LeaderScreen> {
       return Scaffold(appBar: AppBar(), body: const Center(child: Text('Spiel nicht gefunden.')));
     }
 
+    return Stack(children: [
+      _layout(g, now),
+      Positioned.fill(child: BigToastView(queue: _toasts)),
+    ]);
+  }
+
+  Widget _layout(Game g, DateTime now) {
     return LayoutBuilder(builder: (context, box) {
       if (box.maxWidth >= 1000) {
         return Scaffold(
